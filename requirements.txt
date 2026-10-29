@@ -1,0 +1,8 @@
+numpy>=1.26
+pandas>=2.0
+scikit-learn>=1.3
+flask>=3.0
+
+# Optional: enables the Chronos-2 forecaster back end in smart_property/forecast.py.
+# Without it the trend back end is used, which needs nothing extra.
+# chronos-forecasting>=2.0
