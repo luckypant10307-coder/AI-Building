@@ -8,8 +8,15 @@ venv/
 # Datasets: 189 MB of BD3 and house-wall-damage. Training data, not runtime.
 data/
 
-# Training checkpoints and logs. The vision build copies in only the three
-# weights it actually needs, by name, from models/.
+# Training artefacts. The vision build copies in only the three weights it
+# actually needs, by name, from models/.
+#
+# *.ckpt matters most: those are resume checkpoints carrying the AdamW
+# optimiser state as well as the weights, so each is 171 MB against the 45 MB
+# model inside it. Without this rule the build context is 410 MB instead of
+# 52 MB, and every one of those bytes is sent to the Docker daemon on each
+# build whether or not any layer uses them.
+models/*.ckpt
 models/*.log
 models/*.json
 models/_*.pt

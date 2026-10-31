@@ -31,7 +31,7 @@ to report a figure. See [The one component with real data](#the-one-component-wi
 ## Quick start
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-base.txt
 
 python scripts/run_demo.py --fault hidden_pipe_leak --room bathroom --days 18
 python scripts/run_demo.py --fault roof_seepage --room living --language hi
@@ -39,21 +39,26 @@ python scripts/benchmark.py --seeds 25
 python scripts/train_defect_classifier.py --data data/bd3_raw   # real photos
 ```
 
-### The app
-
-A React front end over the Flask API. Build it once, then run the server:
+### The dashboard
 
 ```bash
-cd web && npm install && npm run build && cd ..
-python app.py                      # http://127.0.0.1:5000
+python server.py                   # http://127.0.0.1:5000
 ```
 
-For UI work, run Vite beside Flask and get hot reload with real data:
+`server.py` serves the dashboard from `web/artifact/` and the API it calls:
+`api/config`, `api/state`, `api/history`, `api/inspections` and the
+`api/simulate/*` controls. A clock thread advances the flat about one
+simulated hour per second while a slower thread re-runs the detectors, so the
+readings on screen stay live even while a verdict is being recomputed.
+
+Deploying it:
 
 ```bash
-python app.py                      # terminal 1
-cd web && npm run dev              # terminal 2, http://127.0.0.1:5173
+docker build -t smartprop .                          # sensor spine, 679 MB
+docker build -t smartprop --build-arg WITH_VISION=1 .  # adds components 5 and 7
 ```
+
+`render.yaml` deploys the first of those as a Render web service.
 
 The page shows which of the ten components are actually live on this machine,
 one card per room, and takes a wall photograph per room to bring components 5
@@ -280,7 +285,7 @@ tell rain-driven moisture from a leak.
 - **No vision.** Components 5, 6 and 7 are not built, so no figure here comes
   from real public data. Crack segmentation on Crack-seg is the one result that
   would.
-- **Readings are in memory.** `app.py` keeps readings in a process-local dict.
+- **State is in memory.** `server.py` holds the running flat in one process, which is why it must run with a single worker.
 
 ## Layout
 
@@ -301,5 +306,6 @@ scripts/
   benchmark.py                the three measurements above
   export_dataset.py           labelled windows for component 4
   train_defect_classifier.py  fine-tune ResNet18 on BD3
-app.py           Flask ingest API and dashboard
+server.py        API and dashboard host
+web/artifact/    the dashboard itself
 ```

@@ -17,7 +17,10 @@
 # only if its weights are present, and the dashboard reports which components
 # are live, so a slim deployment says so on screen instead of pretending.
 
+ARG WITH_VISION=0
+
 FROM python:3.12-slim AS base
+ARG WITH_VISION
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -34,7 +37,6 @@ RUN apt-get update \
 COPY requirements-base.txt .
 RUN pip install -r requirements-base.txt
 
-ARG WITH_VISION=0
 COPY requirements-vision.txt .
 RUN if [ "$WITH_VISION" = "1" ]; then \
         pip install -r requirements-vision.txt; \
@@ -46,19 +48,23 @@ COPY smart_property/ ./smart_property/
 COPY server.py ./
 COPY web/artifact/ ./web/artifact/
 
-# Only the three weights the app actually loads, and only when they were asked
-# for. models/ is gitignored, so a Render build from git will not have them:
-# that build is slim by definition, which is why this step must not fail.
-COPY models/ /tmp/models/
-RUN mkdir -p models \
- && if [ "$WITH_VISION" = "1" ]; then \
-        for w in bd3_grouped.pt yolov8n-crack-seg-best.pt sequence_cnn.pt; do \
-            [ -f "/tmp/models/$w" ] && cp "/tmp/models/$w" models/ || true; \
-        done; \
-    fi \
- && rm -rf /tmp/models \
- && ls -la models/ || true
+# Weights, by stage rather than by `if`.
+#
+# A COPY cannot be made conditional, and a later `rm` cannot shrink an earlier
+# layer: copying models/ and then deleting it left 52 MB of unused weights in
+# the slim image for good. So each variant is its own stage and WITH_VISION
+# picks which one the build continues from.
+FROM base AS weights-0
+RUN mkdir -p models && echo "slim build: no model weights"
 
+FROM base AS weights-1
+# Named individually: models/ also holds 340 MB of training checkpoints and
+# duplicate runs that the app never loads.
+COPY models/bd3_grouped.pt models/yolov8n-crack-seg-best.pt \
+     models/sequence_cnn.pt ./models/
+
+FROM weights-${WITH_VISION} AS final
+ARG WITH_VISION
 RUN useradd --create-home --uid 10001 app && chown -R app:app /app
 USER app
 

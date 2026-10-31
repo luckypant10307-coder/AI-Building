@@ -1,9 +1,12 @@
-__pycache__/
-*.pyc
-data/
-.venv/
-models/
-.env
+
+# Editor/agent tooling config, not part of the project
 *.key
-web/node_modules/
+*.pyc
+.env
+.kilo/
+.venv/
+__pycache__/
+data/
+models/
 web/dist/
+web/node_modules/
