@@ -38,8 +38,17 @@ COPY requirements-base.txt .
 RUN pip install -r requirements-base.txt
 
 COPY requirements-vision.txt .
+# ultralytics declares opencv-python as a dependency, so pip installs the GUI
+# build even though requirements-vision.txt asks for the headless one. The GUI
+# build needs libxcb, libGL and friends, none of which are in a slim image, and
+# importing cv2 then dies with "libxcb.so.1: cannot open shared object file" --
+# which the registry catches, leaving component 5 silently switched off.
+# Swapping it for headless afterwards fixes that and is smaller than adding X11.
 RUN if [ "$WITH_VISION" = "1" ]; then \
-        pip install -r requirements-vision.txt; \
+        pip install -r requirements-vision.txt \
+     && pip uninstall -y opencv-python opencv-contrib-python 2>/dev/null || true; \
+        pip install --no-cache-dir --force-reinstall opencv-python-headless \
+     && python -c "import cv2; print('cv2', cv2.__version__, 'headless OK')"; \
     else \
         echo "slim build: skipping torch, ultralytics and opencv"; \
     fi
