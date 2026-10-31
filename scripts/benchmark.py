@@ -78,8 +78,18 @@ def actual_crossing_day(df, room, observed_days):
     return over[0] / SAMPLES_PER_DAY - observed_days
 
 
-def forecast_error(seeds, observed_days=20, total_days=45):
-    errors, evaluated, missed = [], 0, 0
+def forecast_error(seeds, observed_days=20, total_days=45, backend="auto"):
+    """One record per case where the wall really does cross the threshold.
+
+    A case where the forecaster declines to predict is still a case: it is
+    recorded with declined=True and counts as a failure. Dropping those
+    flatters the result, because the hard cases are exactly the ones a linear
+    forecaster gives up on.
+
+    `error` is signed: predicted minus truth, so positive means predicted late.
+    A bias and a spread say different things and are reported separately.
+    """
+    records = []
     for kind in ("hidden_pipe_leak", "roof_seepage"):
         for seed in range(seeds):
             room = room_for(kind, seed)
@@ -89,19 +99,33 @@ def forecast_error(seeds, observed_days=20, total_days=45):
                             room=room, start_day=12.0)
             truth = actual_crossing_day(full, room, observed_days)
             if truth is None or truth <= 0:
-                continue      # already damp, or never gets there: nothing to predict
+                continue      # already damp, or never gets there: not a case
             cut = full["ts"] < full["ts"].min() + np.timedelta64(observed_days, "D")
-            window = full[cut]
-            result = next((r for r in analyse_flat(window) if r["room"] == room), None)
+            result = next((r for r in analyse_flat(full[cut], backend=backend)
+                           if r["room"] == room), None)
             if result is None:
                 continue
             predicted = result["forecast"]["visible_damp"]["days"]
-            evaluated += 1
-            if predicted is None:
-                missed += 1
-            else:
-                errors.append(abs(predicted - truth))
-    return errors, evaluated, missed
+            records.append({
+                "kind": kind,
+                "declined": predicted is None,
+                "error": None if predicted is None else predicted - truth,
+            })
+    return records
+
+
+def summarise(records):
+    """Within-2-days counts every case, a declined prediction included."""
+    errors = [r["error"] for r in records if r["error"] is not None]
+    hits = sum(r["error"] is not None and abs(r["error"]) <= 2.0 for r in records)
+    return {
+        "cases": len(records),
+        "declined": sum(r["declined"] for r in records),
+        "within2": hits,
+        "bias": float(np.mean(errors)) if errors else None,
+        "mae": float(np.mean(np.abs(errors))) if errors else None,
+        "spread": float(np.std(errors)) if errors else None,
+    }
 
 
 def main():
@@ -127,17 +151,33 @@ def main():
     print(f"   {'overall':<18} {correct:>3}/{total} "
           f"({100.0 * correct / total:.1f}%)\n")
 
-    errors, evaluated, missed = forecast_error(args.seeds)
+    records = forecast_error(args.seeds)
     print("3. Days-to-visible-damp, predicted vs simulated truth")
-    if errors:
-        print(f"   cases evaluated         : {evaluated}")
-        print(f"   no crossing predicted   : {missed}")
-        print(f"   mean absolute error     : {np.mean(errors):.2f} days")
-        print(f"   median absolute error   : {np.median(errors):.2f} days")
-        print(f"   within 2 days           : "
-              f"{100.0 * np.mean(np.array(errors) <= 2.0):.0f}%")
-    else:
-        print("   no evaluable cases")
+    print("   A declined prediction counts as a failure, not as an excluded case.")
+    print(f"   {'fault':<18} {'cases':>5} {'declined':>9} {'within 2d':>10} "
+          f"{'bias':>8} {'spread':>8}")
+    for kind in ("hidden_pipe_leak", "roof_seepage"):
+        s = summarise([r for r in records if r["kind"] == kind])
+        if not s["cases"]:
+            continue
+        bias = "-" if s["bias"] is None else f"{s['bias']:+.2f}d"
+        spread = "-" if s["spread"] is None else f"{s['spread']:.2f}d"
+        print(f"   {kind:<18} {s['cases']:>5} {s['declined']:>9} "
+              f"{str(s['within2']) + '/' + str(s['cases']):>10} {bias:>8} {spread:>8}")
+
+    total = summarise(records)
+    if total["cases"]:
+        share = 100.0 * total["within2"] / total["cases"]
+        bias = "-" if total["bias"] is None else f"{total['bias']:+.2f}"
+        print(f"   {'overall':<18} {total['cases']:>5} {total['declined']:>9} "
+              f"{str(total['within2']) + '/' + str(total['cases']):>10} "
+              f"{bias + 'd':>8} {total['spread']:.2f}d")
+        print(f"\n   headline: {share:.0f}% of cases predicted within 2 days")
+        if total["bias"] is not None and total["spread"] is not None:
+            print(f"   bias {total['bias']:+.2f} d against a spread of "
+                  f"{total['spread']:.2f} d: "
+                  + ("mostly systematic, not noise"
+                     if abs(total["bias"]) > total["spread"] else "mostly noise"))
     print("\nAll figures above come from the simulator, not from a real flat.")
 
 

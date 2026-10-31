@@ -15,6 +15,8 @@ rolled; hourly keeps the horizon inside one pass and costs nothing that matters
 for a figure reported in days.
 """
 
+from functools import lru_cache
+
 import numpy as np
 import pandas as pd
 
@@ -51,10 +53,20 @@ def _trend_forecast(history, horizon=HORIZON_HOURS):
     return mid, mid - spread, mid + spread
 
 
-def _chronos_forecast(history, horizon=HORIZON_HOURS):
-    from chronos import Chronos2Pipeline
+@lru_cache(maxsize=1)
+def _chronos_pipeline(model="amazon/chronos-2"):
+    """Load Chronos-2 once per process.
 
-    pipeline = Chronos2Pipeline.from_pretrained("amazon/chronos-2")
+    from_pretrained reaches out to the Hub to revalidate, so calling it per
+    forecast means a network round trip for every room of every flat -- and a
+    stall when the Hub is slow. The weights do not change between calls.
+    """
+    from chronos import Chronos2Pipeline
+    return Chronos2Pipeline.from_pretrained(model)
+
+
+def _chronos_forecast(history, horizon=HORIZON_HOURS):
+    pipeline = _chronos_pipeline()
     context = history.to_numpy()[-2048:]
     frame = pd.DataFrame({
         "id": "room",
@@ -88,7 +100,13 @@ def _first_crossing_days(mid, low, high, threshold, already_over):
 def forecast_room(room_df, backend="auto"):
     """Days until visible damp and until mould risk, for one room."""
     frame = room_df.set_index("ts").sort_index()
-    use_chronos = backend == "chronos" or (backend == "auto" and chronos_available())
+    # "auto" deliberately prefers the trend line even when Chronos-2 is
+    # installed. Measured on 17 held-out leak and seepage runs, the trend
+    # predicted a threshold crossing in 12 of them while Chronos-2 predicted
+    # none: it extrapolates the ramp but damps it, which is a sound prior for
+    # a general time series and the wrong one for moisture accumulating in a
+    # wall. Ask for it explicitly with backend="chronos".
+    use_chronos = backend == "chronos"
     engine = _chronos_forecast if use_chronos else _trend_forecast
 
     out = {"backend": "chronos-2" if use_chronos else "trend"}

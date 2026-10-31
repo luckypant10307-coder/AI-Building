@@ -1,0 +1,11 @@
+# Components 5 and 7, the camera side. Adds roughly 700 MB installed, so a
+# container built with these needs a 2 GB instance, not Render's free tier.
+#
+# opencv-python-headless, not opencv-python: the server never opens a window,
+# and the headless build is far smaller and needs no libGL in the image.
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch>=2.0
+torchvision>=0.15
+ultralytics>=8.3
+opencv-python-headless>=4.9
+scikit-image>=0.22

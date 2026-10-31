@@ -1,0 +1,42 @@
+# Render Blueprint. Commit this at the repo root and point Render at the repo.
+#
+# Deployed as the slim build: the sensor spine, the forecaster, the advisor and
+# the whole dashboard, inside 512 MB. The camera side (components 5 and 7)
+# needs torch plus ~50 MB of weights and about 1 GB of RAM, which the free
+# instance cannot hold -- see the commented service below for that version.
+#
+# The dashboard reports which components are live, so a slim deployment shows
+# "8 of 10" rather than implying the vision models are running.
+
+services:
+  - type: web
+    name: smart-property-ai
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/config
+    autoDeploy: true
+    envVars:
+      # Set this in the Render dashboard, not here, so the key stays out of git.
+      # Without it the advisor serves its template text, which is the
+      # documented fallback rather than a failure.
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: PYTHONUNBUFFERED
+        value: "1"
+
+  # The full build, with components 5 and 7. Needs a paid instance for the
+  # memory, and the weights must be in the build context -- models/ is
+  # gitignored, so either commit them with Git LFS or fetch them in the build.
+  #
+  # - type: web
+  #   name: smart-property-ai-vision
+  #   runtime: docker
+  #   plan: standard          # 2 GB; starter's 512 MB will be killed by the OOM reaper
+  #   dockerfilePath: ./Dockerfile
+  #   healthCheckPath: /api/config
+  #   dockerBuildArgs:
+  #     WITH_VISION: "1"
+  #   envVars:
+  #     - key: GEMINI_API_KEY
+  #       sync: false

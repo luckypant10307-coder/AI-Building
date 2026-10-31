@@ -72,6 +72,8 @@ def main():
     parser.add_argument("--start-day", type=float, default=10.0)
     parser.add_argument("--language", choices=["en", "hi"], default="en")
     parser.add_argument("--json", action="store_true")
+    parser.add_argument("--llm", choices=["none", "gemini"], default="none",
+                        help="gemini rewrites the advice; needs GEMINI_API_KEY")
     args = parser.parse_args()
 
     if sys.stdout.encoding and sys.stdout.encoding.lower() != "utf-8":
@@ -79,7 +81,13 @@ def main():
 
     df = simulate(seed=args.seed, days=args.days, fault_kind=args.fault,
                   room=args.room if args.fault else None, start_day=args.start_day)
-    results = analyse_flat(df, language=args.language)
+    llm = None
+    if args.llm == "gemini":
+        from smart_property.llm import build_advisor
+        llm = build_advisor(args.language)
+        if llm is None:
+            print("GEMINI_API_KEY is not set; using template advice.\n")
+    results = analyse_flat(df, language=args.language, llm=llm)
 
     if args.json:
         print(json.dumps(results, indent=2, default=str))

@@ -1,9 +1,11 @@
 """Flat layout, sensor spec and the physical thresholds damage is judged against."""
 
-ROOMS = ["living", "kitchen", "bathroom", "bedroom"]
+# Mirrors smart_property.flat_model, which is the dashboard's contract.
+ROOMS = ["living", "master", "bedroom2", "kitchen", "bathroom"]
 
 # Rooms on an external//top-floor wall are the ones rain can reach.
-EXTERNAL_WALL = {"living": True, "kitchen": True, "bathroom": False, "bedroom": True}
+EXTERNAL_WALL = {"living": True, "master": True, "bedroom2": True,
+                 "kitchen": True, "bathroom": False}
 
 SENSORS = [
     "wall_moisture",     # % volumetric water content in the plaster

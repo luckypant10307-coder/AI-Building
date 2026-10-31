@@ -1,0 +1,972 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Smart Property AI</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+Condensed:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<style>
+/* Layout: instrument console. Summary strip, then floor plan + findings side by side, room readings below. */
+:root {
+  --bg: #e9ece7;          /* plaster */
+  --surface: #f7f8f5;
+  --sunk: #dfe3dd;
+  --ink: #17222a;
+  --muted: #5a6670;
+  --faint: #5c6870;
+  --line: #cfd5ce;
+  --accent: #1d6a86;      /* water line */
+  --accent-soft: #d3e6ec;
+  --ok: #2c7a4b;
+  --watch: #a86a12;
+  --alert: #bf3b27;
+  --rain: #6f8fa8;
+  --f-display: "IBM Plex Sans Condensed", "Arial Narrow", system-ui, sans-serif;
+  --f-body: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 6px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0f1518; --surface: #162026; --sunk: #1c2830; --ink: #e3e9e6; --muted: #98a6ad; --faint: #87959c;
+  --line: #2a3840; --accent: #5ab0cd; --accent-soft: #1d3a46; --ok: #58b67c; --watch: #e0a446; --alert: #ef6b56; --rain: #7f9fb8;
+  color-scheme: dark; } }
+:root[data-theme="dark"] {
+  --bg: #0f1518; --surface: #162026; --sunk: #1c2830; --ink: #e3e9e6; --muted: #98a6ad; --faint: #87959c;
+  --line: #2a3840; --accent: #5ab0cd; --accent-soft: #1d3a46; --ok: #58b67c; --watch: #e0a446; --alert: #ef6b56; --rain: #7f9fb8;
+  color-scheme: dark; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+body { background: var(--bg); color: var(--ink); font: 14px/1.5 var(--f-body); margin: 0; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: var(--surface); }
+.wrap { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 0 40px; display: grid; gap: 16px; }
+h1, h2, h3 { font-family: var(--f-display); font-weight: 600; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); font-weight: 600; }
+.mono { font-family: var(--f-mono); font-variant-numeric: tabular-nums; }
+button, select { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* top bar */
+.bar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: var(--surface); border-bottom: 1px solid var(--line); }
+.bar-in { max-width: 1180px; margin: 0 auto; padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+.brand h1 { font-size: 20px; }
+.chip { font: 500 11px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .06em; padding: 5px 7px; border-radius: 4px;
+  background: var(--accent-soft); color: var(--accent); white-space: nowrap; }
+.clock { display: flex; align-items: center; gap: 8px; }
+.clock .mono { font-size: 13px; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.seg button { border: 0; background: transparent; padding: 5px 9px; font: 500 12px var(--f-mono); color: var(--muted); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--surface); }
+.icon-btn { border: 1px solid var(--line); background: var(--surface); border-radius: var(--r); padding: 4px 10px; font-size: 12px; }
+
+/* summary strip */
+.strip { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line);
+  border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; margin-top: 16px; }
+.cell { background: var(--surface); padding: 12px 14px; display: grid; gap: 2px; min-width: 0; }
+.cell .k { font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.cell .v { font: 500 26px/1.15 var(--f-mono); font-variant-numeric: tabular-nums; }
+.cell .v small { font-size: 13px; color: var(--muted); margin-left: 3px; }
+.cell .s { font-size: 12px; color: var(--muted); }
+.v.ok { color: var(--ok); } .v.watch { color: var(--watch); } .v.alert { color: var(--alert); }
+@media (max-width: 720px) { .strip { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+
+.banner { background: var(--accent-soft); color: var(--ink); border-radius: var(--r); padding: 10px 14px; font-size: 13px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.banner b { color: var(--accent); }
+
+.grid2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.05fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .grid2 { grid-template-columns: minmax(0, 1fr); } }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; display: grid; gap: 12px; min-width: 0; }
+.panel-head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.hint { font-size: 12px; color: var(--faint); }
+
+/* floor plan */
+.plan svg { width: 100%; height: auto; display: block; }
+.room-rect { stroke: var(--ink); stroke-width: 1.4; cursor: pointer; transition: fill .3s; }
+.room-rect.ok { fill: color-mix(in srgb, var(--ok) 10%, var(--surface)); }
+.room-rect.watch { fill: color-mix(in srgb, var(--watch) 20%, var(--surface)); }
+.room-rect.alert { fill: color-mix(in srgb, var(--alert) 22%, var(--surface)); }
+.room-rect.sel { stroke: var(--accent); stroke-width: 3; }
+.room-name { font: 600 12px var(--f-display); fill: var(--ink); pointer-events: none; }
+.room-hp { font: 500 18px var(--f-mono); pointer-events: none; }
+.room-hp.ok { fill: var(--ok); } .room-hp.watch { fill: var(--watch); } .room-hp.alert { fill: var(--alert); }
+.room-sub { font: 400 9.5px var(--f-mono); fill: var(--muted); pointer-events: none; }
+.probe { fill: var(--accent); }
+.pulse { fill: none; stroke: var(--alert); stroke-width: 2; animation: pulse 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+@keyframes pulse { from { transform: scale(.6); opacity: 1 } to { transform: scale(2.4); opacity: 0 } }
+@media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 12px; color: var(--muted); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 9px; height: 9px; border-radius: 50%; background: var(--accent); display: inline-block; }
+.sw { width: 10px; height: 10px; border-radius: 2px; border: 1px solid var(--ink); display: inline-block; }
+
+/* findings */
+.findings { display: grid; gap: 10px; }
+.finding { border: 1px solid var(--line); border-left: 4px solid var(--watch); border-radius: var(--r); padding: 12px; display: grid; gap: 8px; background: var(--surface); }
+.finding.alert { border-left-color: var(--alert); }
+.f-top { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
+.f-top h3 { font-size: 17px; margin-right: auto; }
+.pill { font: 600 10.5px/1 var(--f-mono); text-transform: uppercase; letter-spacing: .07em; padding: 4px 6px; border-radius: 3px; color: var(--surface); background: var(--watch); }
+.pill.alert { background: var(--alert); }
+.f-meta { font-size: 12px; color: var(--muted); display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+.conf { display: inline-flex; align-items: center; gap: 6px; }
+.conf i { display: block; width: 64px; height: 6px; background: var(--sunk); border-radius: 3px; overflow: hidden; }
+.conf i b { display: block; height: 100%; background: var(--ink); }
+.evidence { margin: 0; padding-left: 18px; font-size: 13px; display: grid; gap: 2px; }
+.forecast { font-size: 13.5px; font-weight: 500; background: var(--sunk); padding: 8px 10px; border-radius: 4px; }
+.forecast::before { content: "Forecast  "; font: 600 10.5px var(--f-mono); letter-spacing: .07em; text-transform: uppercase; color: var(--accent); }
+details.advice summary { cursor: pointer; font-size: 13px; color: var(--accent); font-weight: 500; }
+details.advice dl { margin: 8px 0 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 12px; font-size: 13px; }
+details.advice dt { color: var(--muted); font-size: 12px; }
+details.advice dd { margin: 0; }
+.empty { padding: 18px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: var(--r); font-size: 13px; }
+
+/* room detail */
+.readings { display: grid; grid-template-columns: repeat(auto-fit, minmax(118px, 1fr)); gap: 8px; }
+.rd { background: var(--sunk); border-radius: 4px; padding: 8px 10px; min-width: 0; }
+.rd .k { font-size: 11px; color: var(--muted); }
+.rd .v { font: 500 18px var(--f-mono); font-variant-numeric: tabular-nums; }
+.rd .v small { font-size: 11px; color: var(--muted); }
+.charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px; }
+.chart { position: relative; min-width: 0; }
+.chart h4 { margin: 0 0 2px; font: 500 13px var(--f-body); display: flex; justify-content: space-between; gap: 8px; }
+.chart h4 span { color: var(--muted); font: 400 12px var(--f-mono); }
+.chart svg { width: 100%; height: 130px; display: block; overflow: visible; }
+.axis { font: 400 9.5px var(--f-mono); fill: var(--faint); }
+.grid-l { stroke: var(--line); stroke-width: 1; }
+.thr { stroke: var(--alert); stroke-width: 1; stroke-dasharray: 4 3; }
+.thr-t { font: 500 9.5px var(--f-mono); fill: var(--alert); }
+.rainband { fill: var(--rain); opacity: .16; }
+.series { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linejoin: round; }
+.area { fill: var(--accent); opacity: .08; }
+.endpt { fill: var(--accent); stroke: var(--surface); stroke-width: 2; }
+.xh { stroke: var(--muted); stroke-width: 1; }
+.tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--surface); font: 500 11px/1.35 var(--f-mono);
+  padding: 5px 7px; border-radius: 4px; white-space: nowrap; transform: translate(-50%, -100%); }
+
+/* simulator */
+.sim-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.inj { border: 1px solid var(--line); border-radius: var(--r); padding: 10px; display: grid; gap: 8px; background: var(--surface); }
+.inj b { font-size: 13.5px; }
+.inj p { margin: 0; font-size: 12px; color: var(--muted); }
+.inj-row { display: flex; gap: 6px; }
+.inj-row select { flex: 1; min-width: 0; border: 1px solid var(--line); border-radius: 4px; background: var(--surface); padding: 5px; }
+.btn { border: 1px solid var(--ink); background: var(--ink); color: var(--surface); border-radius: 4px; padding: 5px 12px; font-weight: 500; font-size: 13px; }
+.btn.ghost { background: transparent; color: var(--ink); }
+.truth { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; font-size: 12.5px; }
+.truth .t { background: var(--sunk); border-radius: 4px; padding: 4px 8px; font-family: var(--f-mono); font-size: 11.5px; }
+pre.code { margin: 0; background: var(--sunk); padding: 10px; border-radius: 4px; overflow-x: auto; font: 12px/1.5 var(--f-mono); }
+.pill.ok { background: var(--ok); }
+
+/* walls and camera inspections */
+.sub { font: 600 12px var(--f-display); text-transform: uppercase; letter-spacing: .08em; color: var(--muted); margin: 6px 0 0; }
+.walls { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 10px; }
+.wallcard { border: 1px solid var(--line); border-radius: var(--r); padding: 10px; display: grid; gap: 8px; min-width: 0; align-content: start; }
+.wallcard.alert { border-color: var(--alert); } .wallcard.watch { border-color: var(--watch); }
+.wallcard h4 { margin: 0; font: 600 14px var(--f-display); display: flex; justify-content: space-between; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+.wallcard h4 span { font: 400 11px var(--f-mono); color: var(--muted); }
+.wallcard svg { display: block; max-width: 100%; height: auto; }
+.w-face { fill: var(--sunk); stroke: var(--ink); stroke-width: 1; }
+.w-floor { stroke: var(--ink); stroke-width: 2; }
+.w-marker { fill: var(--surface); stroke: var(--ink); stroke-width: 1.2; }
+.w-ink { fill: var(--ink); }
+.w-label { font: 500 9.5px var(--f-mono); fill: var(--muted); }
+.w-crack { fill: none; stroke: var(--ink); stroke-width: 1.6; stroke-linejoin: round; }
+.w-stain { fill: var(--watch); opacity: .28; }
+.pin circle { stroke: var(--surface); stroke-width: 1.5; }
+.pin.ok circle { fill: var(--ok); } .pin.watch circle { fill: var(--watch); } .pin.alert circle { fill: var(--alert); }
+.pin text { font: 600 9px var(--f-mono); fill: var(--surface); }
+.w-list { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; font-size: 12.5px; }
+.w-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; }
+.w-none { font-size: 12.5px; color: var(--faint); margin: 0; }
+.num { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; font: 600 10px var(--f-mono); color: var(--surface); background: var(--muted); }
+.num.ok { background: var(--ok); } .num.watch { background: var(--watch); } .num.alert { background: var(--alert); }
+.num.probe-n { background: var(--accent); }
+.cam-link { font-size: 13px; padding: 8px 10px; border-radius: 4px; border: 1px dashed var(--line); }
+.cam-link::before { content: "Camera check  "; font: 600 10.5px var(--f-mono); letter-spacing: .07em; text-transform: uppercase; color: var(--accent); }
+.cam-link.confirmed { border-style: solid; border-color: var(--alert); }
+.cam { stroke: var(--surface); stroke-width: 1; } .cam.ok { fill: var(--ok); } .cam.watch { fill: var(--watch); } .cam.alert { fill: var(--alert); }
+.sq { width: 9px; height: 9px; background: var(--watch); display: inline-block; }
+.insp { display: grid; }
+.insp-row { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr) minmax(0, 2fr); gap: 4px 16px; padding: 10px 0; border-top: 1px solid var(--line); align-items: start; font-size: 13px; }
+.insp-row:first-child { border-top: 0; }
+@media (max-width: 720px) { .insp-row { grid-template-columns: minmax(0, 1fr); } }
+.insp-row .hint { display: block; }
+.linkish { border: 0; background: none; padding: 0; font: 600 13px var(--f-body); color: var(--ink); text-align: left; display: inline-flex; gap: 6px; align-items: center; }
+.linkish:hover { color: var(--accent); }
+.verdict { display: grid; gap: 4px; justify-items: start; }
+.tag { font: 500 10px var(--f-mono); text-transform: uppercase; letter-spacing: .06em; color: var(--muted); border: 1px solid var(--line); border-radius: 3px; padding: 1px 4px; }
+.logform { display: flex; flex-wrap: wrap; gap: 8px; align-items: end; padding-top: 12px; border-top: 1px solid var(--line); }
+.logform label { display: grid; gap: 3px; font-size: 11.5px; color: var(--muted); }
+.logform select, .logform input { border: 1px solid var(--line); border-radius: 4px; background: var(--surface); padding: 5px; font: 13px var(--f-body); color: var(--ink); min-width: 0; }
+.logform input { width: 92px; }
+.logform .msg { font-size: 12.5px; color: var(--accent); align-self: center; }
+.foot { font-size: 12px; color: var(--faint); }
+</style>
+
+<header class="bar"><div class="bar-in">
+  <div class="brand"><h1>Smart Property AI</h1><span class="chip" id="mode">starting</span></div>
+  <div class="clock"><span class="mono" id="clock">--</span>
+    <button class="icon-btn" id="pause" type="button">Pause</button>
+    <div class="seg" role="group" aria-label="Simulation speed" id="speed">
+      <button type="button" data-s="1">15m/s</button><button type="button" data-s="4">1h/s</button><button type="button" data-s="16">4h/s</button>
+    </div>
+  </div>
+</div></header>
+
+<main class="wrap">
+  <section class="strip" aria-label="Flat summary">
+    <div class="cell"><span class="k">Property health</span><span class="v" id="s-health">--</span><span class="s" id="s-health-s">&nbsp;</span></div>
+    <div class="cell"><span class="k">Water meter</span><span class="v" id="s-flow">--</span><span class="s" id="s-flow-s">&nbsp;</span></div>
+    <div class="cell"><span class="k">Hidden water loss</span><span class="v" id="s-loss">--</span><span class="s" id="s-loss-s">&nbsp;</span></div>
+    <div class="cell"><span class="k">Outdoor</span><span class="v" id="s-wx">--</span><span class="s" id="s-wx-s">&nbsp;</span></div>
+  </section>
+
+  <div class="banner" id="banner" hidden></div>
+
+  <div class="grid2">
+    <section class="panel plan">
+      <div class="panel-head"><h2>Floor plan</h2><span class="hint">Tap a room for its sensors</span></div>
+      <svg id="plan" viewBox="0 0 400 312" role="img" aria-label="Floor plan coloured by room health"></svg>
+      <div class="legend">
+        <span><i class="sw" style="background:color-mix(in srgb,var(--ok) 10%,var(--surface))"></i>Healthy</span>
+        <span><i class="sw" style="background:color-mix(in srgb,var(--watch) 20%,var(--surface))"></i>Watch</span>
+        <span><i class="sw" style="background:color-mix(in srgb,var(--alert) 22%,var(--surface))"></i>Problem found</span>
+        <span><i class="dot"></i>Wall probe</span>
+        <span><i class="sq"></i>Camera finding</span>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Findings</h2><span class="hint" id="f-count"></span></div>
+      <div class="findings" id="findings"></div>
+    </section>
+  </div>
+
+  <section class="panel">
+    <div class="panel-head"><h2 id="room-title">Room</h2><span class="hint">Last 3 days · shaded = rain</span></div>
+    <div class="readings" id="readings"></div>
+    <div class="charts" id="charts"></div>
+    <h3 class="sub">Walls and markers</h3>
+    <div class="walls" id="walls"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Wall inspections</h2><span class="hint">Camera findings, pinned to walls by their ArUco marker</span></div>
+    <div class="insp" id="insp"></div>
+    <form class="logform" id="logform">
+      <label for="lf-wall">Wall<select id="lf-wall"></select></label>
+      <label for="lf-type">Defect<select id="lf-type"><option value="stain">stain</option><option value="mould">mould</option><option value="peeling">peeling</option><option value="crack">crack</option></select></label>
+      <label for="lf-x">From left (m)<input id="lf-x" type="number" step="0.05" min="0" value="0.7" required></label>
+      <label for="lf-y">Height (m)<input id="lf-y" type="number" step="0.05" min="0" value="0.35" required></label>
+      <label for="lf-w">Crack width (mm)<input id="lf-w" type="number" step="0.1" min="0" placeholder="cracks only"></label>
+      <button class="btn" type="submit">Log photo finding</button>
+      <span class="msg" id="lf-msg" role="status"></span>
+    </form>
+    <p class="foot">This form stands in for the vision module: it sends the same record the camera pipeline will post to <span class="mono">POST /api/inspections</span>. Rows tagged example are sample data.</p>
+  </section>
+
+  <section class="panel" id="sim-panel">
+    <div class="panel-head"><h2>Fault simulator</h2><span class="hint">Inject a hidden problem and watch the AI find it</span></div>
+    <div class="sim-grid" id="inject"></div>
+    <div class="truth" id="truth"></div>
+  </section>
+
+  <section class="panel">
+    <div class="panel-head"><h2>Connect real sensors</h2><span class="hint">Hardware-agnostic ingest API</span></div>
+    <pre class="code">POST /api/ingest
+{"ts": "2026-10-21T14:15:00",
+ "readings": {"bathroom.moisture": 13.4, "bathroom.wall_temp": 25.9,
+              "bathroom.acoustic": 28.1, "flow": 0.0, "out.temp": 29.2}}</pre>
+    <p class="foot">Any ESP32, LoRa gateway or smart water meter can post readings. The engine learns a normal week, then starts detecting.</p>
+  </section>
+</main>
+
+<script>
+/* ================================================================
+   Browser engine: a JavaScript port of engine/simulator.py and
+   engine/detector.py, used when no backend server is reachable.
+   (The server uses an Isolation Forest; this port uses a z-score
+   anomaly model so it can run with no libraries.)
+   ================================================================ */
+const H = 4, DAY = 96, DT = 0.25;
+const ROOMS = [
+  {id:"living", name:"Living Room", exterior:true, acoustic:false, under_terrace:true, base_moisture:11.5, plan:[0,0,55,50]},
+  {id:"master", name:"Master Bedroom", exterior:true, acoustic:false, under_terrace:true, base_moisture:12.0, plan:[55,0,45,50]},
+  {id:"bedroom2", name:"Bedroom 2", exterior:true, acoustic:false, under_terrace:true, base_moisture:12.5, plan:[55,50,45,50]},
+  {id:"kitchen", name:"Kitchen", exterior:true, acoustic:true, under_terrace:false, base_moisture:12.0, plan:[0,50,30,50]},
+  {id:"bathroom", name:"Bathroom", exterior:false, acoustic:true, under_terrace:false, base_moisture:13.0, plan:[30,50,25,50]},
+];
+const FAULTS = {
+  pipe_leak: {label:"Hidden pipe leak in wall", rooms:["bathroom","kitchen"]},
+  roof_seepage: {label:"Roof / terrace seepage", rooms:["living","master","bedroom2"]},
+  condensation: {label:"Condensation & mould risk", rooms:["master","bedroom2","bathroom"]},
+  fixture_leak: {label:"Running toilet / dripping tap", rooms:["bathroom"]},
+};
+const FAULT_DESC = {
+  pipe_leak: "Water escaping from a concealed pipe. The wall still looks dry.",
+  roof_seepage: "Rain soaking through the terrace slab. Brings a rain shower.",
+  condensation: "Humid air meeting a cold wall: the start of mould.",
+  fixture_leak: "A cistern that never stops filling. Wastes water, wets nothing.",
+};
+const VISIBLE = 20, MOULD = 80, CONT_LPM = 0.04, CONT_H = 4, AC_DB = 4, QUIET = 1.5;
+const USAGE_P = [...Array(5).fill(.03), .15, .55,.55,.55, .25,.25,.25, .35,.35, .2,.2,.2,.2, .45,.45,.45,.45, .15,.15];
+const IMPACT = {pipe_leak:70, roof_seepage:55, condensation:45, fixture_leak:25, anomaly:15};
+
+const es = t => 6.112 * Math.exp(17.62 * t / (243.12 + t));
+const rhFromVp = (t, e) => Math.min(100, 100 * e / es(t));
+const srhOf = (t, rh, wt) => Math.min(100, 100 * (rh / 100 * es(t)) / es(wt));
+const dewPoint = (t, rh) => { const g = Math.log(Math.max(rh, .1) / 100) + 17.62 * t / (243.12 + t); return 243.12 * g / (17.62 - g); };
+const mean = a => a.reduce((s, v) => s + v, 0) / (a.length || 1);
+const std = a => { const m = mean(a); return Math.sqrt(mean(a.map(v => (v - m) ** 2))); };
+const median = a => { const s = [...a].sort((x, y) => x - y); const n = s.length; return n ? (n % 2 ? s[(n - 1) / 2] : (s[n / 2 - 1] + s[n / 2]) / 2) : 0; };
+const pct = (a, p) => { const s = [...a].sort((x, y) => x - y); if (!s.length) return 0; const i = (s.length - 1) * p / 100, lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo); };
+const interp = (x, xs, ys) => { if (x <= xs[0]) return ys[0]; for (let i = 1; i < xs.length; i++) if (x <= xs[i]) return ys[i-1] + (ys[i]-ys[i-1]) * (x-xs[i-1]) / (xs[i]-xs[i-1]); return ys[ys.length-1]; };
+function linfit(x, y) { const mx = mean(x), my = mean(y); let n = 0, d = 0; for (let i = 0; i < x.length; i++) { n += (x[i]-mx)*(y[i]-my); d += (x[i]-mx)**2; } const b = d ? n/d : 0; return [b, my - b*mx]; }
+const slopePerDay = y => y.length < 8 ? 0 : linfit(y.map((_, i) => i / DAY), y)[0];
+const inH = (h, a, b) => h >= a && h < b;
+
+function makeRng(seed) {
+  let a = seed >>> 0;
+  const u = () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; };
+  const n = (m = 0, s = 1) => { let x = 0; while (!x) x = u(); return m + s * Math.sqrt(-2 * Math.log(x)) * Math.cos(2 * Math.PI * u()); };
+  return { u, n, uni: (lo, hi) => lo + (hi - lo) * u(), int: (lo, hi) => lo + Math.floor(u() * (hi - lo)) };
+}
+
+class FlatSimulator {
+  constructor(seed, start, rainPerDay = 0.3) {
+    this.r = makeRng(seed); this.t = new Date(start); this.i = 0; this.rainPerDay = rainPerDay;
+    this.faults = []; this.rain = []; this.planned = 0; this.tLag = 25; this.dT = 0; this.dRH = 0;
+    this.s = Object.fromEntries(ROOMS.map(r => [r.id, {e: 18, m: r.base_moisture}]));
+    this.planRain(3);
+  }
+  planRain(days) { const target = Math.floor(this.i / DAY) + days;
+    while (this.planned <= target) { const d = this.planned;
+      if (d > 0 && this.r.u() < this.rainPerDay) this.rain.push([d * DAY + this.r.int(0, DAY), this.r.int(1, 5) * H, this.r.uni(2, 12)]);
+      this.planned++; } }
+  rainAt(step) { let s = 0; for (const [a, n, mm] of this.rain) if (step >= a && step < a + n) s += mm; return s; }
+  rainForecast(hours = 72) { let s = 0; for (let k = this.i; k < this.i + hours * H; k++) s += this.rainAt(k) * DT; return +s.toFixed(1); }
+  forceRain(inH_ = 1, hours = 3, mm = 8) { this.rain.push([this.i + inH_ * H, hours * H, mm]); }
+  inject(type, room, sev) {
+    sev = sev ?? this.r.uni(0.7, 1.3);
+    this.faults = this.faults.filter(f => !(f.type === type && f.room === room));
+    this.faults.push({type, room, severity: +sev.toFixed(2), start: this.i, since: this.t.toISOString()});
+    if (type === "roof_seepage" && this.rainForecast(12) < 5) this.forceRain(1, 3, 8);
+  }
+  fault(type, room) { return this.faults.find(f => f.type === type && (!room || f.room === room)); }
+  days(f) { return (this.i - f.start) / DAY; }
+  leak() { let t = 0; for (const f of this.faults) {
+    if (f.type === "pipe_leak") t += 0.22 * f.severity * Math.min(1, 0.6 + 0.4 * this.days(f) / 5);
+    if (f.type === "fixture_leak") t += 0.10 * f.severity; } return t; }
+  step() {
+    const r = this.r; this.planRain(3);
+    const h = this.t.getHours() + this.t.getMinutes() / 60, ph = Math.sin(2 * Math.PI * (h - 9) / 24);
+    this.dT = .97 * this.dT + r.n(0, .15); this.dRH = .97 * this.dRH + r.n(0, .8);
+    const rain = this.rainAt(this.i);
+    const tOut = 25 + 6 * ph + this.dT + r.n(0, .2) - (rain ? 2 : 0);
+    let rhOut = rain ? 88 + r.n(0, 3) : 55 - 15 * ph + this.dRH + r.n(0, 1);
+    rhOut = Math.min(99, Math.max(20, rhOut));
+    this.tLag += (tOut - this.tLag) * (1 - Math.exp(-DT / 3));
+    const eOut = rhOut / 100 * es(tOut);
+    const shower = inH(h, 7, 7.5) || inH(h, 21, 21.5);
+    let flow = 0;
+    if (shower) flow += r.uni(3.5, 6); else if (r.u() < USAGE_P[Math.floor(h)]) flow += Math.exp(Math.log(h < 5 ? .45 : 1) + .6 * r.n());
+    flow += this.leak();
+    const out = {ts: new Date(this.t), "out.temp": tOut, "out.rh": rhOut, "out.rain": rain, flow: +flow.toFixed(2)};
+    for (const room of ROOMS) {
+      const id = room.id, s = this.s[id], cond = this.fault("condensation", id);
+      let t = 26 + .45 * (this.tLag - 25) + ({kitchen: .6, bathroom: .3}[id] || 0);
+      if (id === "bathroom" && shower) t += 1.2; t += r.n(0, .12);
+      let gen = .3, tau = 1;
+      if (id === "living") gen = inH(h, 18, 23) ? 1 : .3;
+      else if (id === "master" || id === "bedroom2") gen = (h >= 22 || h < 7) ? 1.5 : .3;
+      else if (id === "kitchen") { gen = (inH(h,7.5,8.5) || inH(h,12.5,13.5) || inH(h,19.5,20.5)) ? 8.5 : .7; tau = .7; }
+      else if (id === "bathroom") { gen = shower ? 30 : 1.6; tau = .6; }
+      if (cond) { gen += 2.5 * cond.severity; tau *= 3; }
+      s.e += (eOut + gen * tau - s.e) * (1 - Math.exp(-DT / tau)); s.e = Math.min(s.e, .98 * es(t));
+      const rh = rhFromVp(t, s.e);
+      const base = room.base_moisture; let target = base, tauM = 72;
+      const pipe = this.fault("pipe_leak", id);
+      if (pipe) { target += 14 * pipe.severity * Math.min(1, .6 + .4 * this.days(pipe) / 5); tauM = 36; }
+      if (cond) target += 4 * cond.severity;
+      s.m += (target - s.m) * (1 - Math.exp(-DT / tauM));
+      const seep = this.fault("roof_seepage", id);
+      if (seep) s.m += this.rainAt(this.i - 4 * H) * DT * .2 * seep.severity;
+      s.m = Math.min(35, Math.max(6, s.m + r.n(0, .015)));
+      const k = room.exterior ? .15 : .04, bridge = cond ? 1.5 * cond.severity : 0, evap = Math.min(3, .22 * Math.max(0, s.m - base));
+      out[id + ".temp"] = t; out[id + ".rh"] = rh;
+      out[id + ".wall_temp"] = t - k * (t - this.tLag) - bridge - evap + r.n(0, .08);
+      out[id + ".moisture"] = s.m + r.n(0, .1);
+      if (room.acoustic) { let db = 28 + r.n(0, 1) + 5 * Math.min(1, flow / 4);
+        for (const f of this.faults) {
+          if (f.type === "pipe_leak") db += f.room === id ? 9 * f.severity : 2.2 * f.severity;
+          if (f.type === "fixture_leak" && id === "bathroom") db += 2.5 * f.severity; }
+        out[id + ".acoustic"] = db; }
+    }
+    this.t = new Date(this.t.getTime() + 15 * 60000); this.i++;
+    return out;
+  }
+  injected() { return this.faults.map(f => ({...f, label: FAULTS[f.type].label, room_name: ROOMS.find(r => r.id === f.room).name})); }
+}
+
+class Store {
+  constructor(maxDays = 14) { this.max = maxDays * DAY; this.ts = []; this.c = {}; }
+  get length() { return this.ts.length; }
+  append(rd) { for (const k in rd) if (k !== "ts") (this.c[k] ||= []).push(rd[k]); this.ts.push(rd.ts);
+    if (this.ts.length > this.max) { this.ts.shift(); for (const k in this.c) this.c[k].shift(); } }
+  last(k, n) { const a = this.c[k]; return n ? a.slice(-n) : a.slice(); }
+}
+
+const TITLES = {...Object.fromEntries(Object.entries(FAULTS).map(([k, v]) => [k, v.label])), anomaly: "Unusual sensor pattern"};
+const ADVICE = {
+  pipe_leak: {urgency:"High", cause:"A supply or drain pipe inside the {room} wall is leaking. Water is soaking the plaster from inside, so the wall surface still looks normal.", action:"Close the {room} isolation valve if you have one and call a plumber with a leak detector. Ask them to check concealed pipes and joints behind the marked wall before tiles or plaster are broken.", who:"Plumber (concealed-pipe leak detection)", ignore:"Damp patches, peeling paint and tile hollowness, then possible seepage into the neighbour's flat."},
+  roof_seepage: {urgency:"Medium", cause:"Rainwater is seeping through the terrace or roof slab above the {room}. Moisture rises a few hours after each shower and dries slowly in between.", action:"Clear the terrace drains, then have the terrace waterproofing and parapet joints inspected before the next heavy rain. Raise it with the RWA if the terrace is shared.", who:"Waterproofing contractor / RWA maintenance", ignore:"Ceiling stains, spalling plaster and, over seasons, corrosion of the slab reinforcement."},
+  condensation: {urgency:"Medium", cause:"The {room} air is too humid for its cold wall. Moisture condenses on the wall surface and creates conditions where mould grows. Common triggers: drying clothes indoors, a blocked exhaust, closed windows.", action:"Ventilate daily, run or fix the exhaust fan, keep furniture 5 cm off the wall and avoid drying clothes in this room. A dehumidifier helps if the problem persists.", who:"No contractor needed yet; an electrician if the exhaust fan is faulty", ignore:"Black mould spots, musty smell and damaged paint; mould spores can aggravate allergies."},
+  fixture_leak: {urgency:"Low", cause:"Water keeps flowing even when nobody uses it, but no wall is getting wet. This is the signature of a running toilet cistern or a dripping tap rather than a hidden pipe.", action:"Put a few drops of food colour in the toilet cistern; if colour reaches the bowl without flushing, the flapper or fill valve needs replacing. Check taps for drips.", who:"Plumber (simple fixture repair) or DIY", ignore:"Steady water wastage and a higher water bill; no structural damage."},
+  anomaly: {urgency:"Low", cause:"The AI model sees a sensor pattern in the {room} that does not match the normal week it learned, but it does not match a known fault signature either.", action:"Check the room for anything new (wet mopping, a new appliance, a moved sensor). If it continues, inspect the monitored wall.", who:"Self-check", ignore:"Possibly nothing; unexplained changes are worth a look."},
+};
+const advise = (t, name) => Object.fromEntries(Object.entries(ADVICE[t]).map(([k, v]) => [k, v.replaceAll("{room}", name)]));
+
+class Detector {
+  constructor() { this.trained = false; this.base = {}; this.firstSeen = {}; }
+  derived(st, n) {
+    const tOut = st.last("out.temp", n); const lag = []; let acc = tOut[0]; const al = 1 - Math.exp(-DT / 3);
+    for (const v of tOut) { acc += al * (v - acc); lag.push(acc); }
+    const out = {};
+    for (const r of ROOMS) { const id = r.id;
+      const t = st.last(id + ".temp", n), rh = st.last(id + ".rh", n), w = st.last(id + ".wall_temp", n);
+      const d = {t, rh, wall: w, m: st.last(id + ".moisture", n), srh: t.map((v, i) => srhOf(v, rh[i], w[i])),
+        delta: t.map((v, i) => v - w[i]), drive: t.map((v, i) => v - lag[i])};
+      if (r.acoustic) d.ac = st.last(id + ".acoustic", n);
+      out[id] = d; }
+    return out;
+  }
+  resid(d, b) { return d.delta.map((v, i) => v - (b.fit[1] + b.fit[0] * d.drive[i])); }
+  feats(d, b, flow) { const res = this.resid(d, b);
+    return d.rh.map((_, i) => [d.rh[i], d.srh[i], res[i], d.m[i] - b.m_mean, d.ac ? (flow[i] < QUIET ? d.ac[i] - b.ac_quiet : 0) : 0]); }
+  train(st) {
+    const der = this.derived(st), flow = st.last("flow");
+    for (const r of ROOMS) { const d = der[r.id];
+      const b = {m_mean: mean(d.m), m_std: Math.max(std(d.m), .3), fit: linfit(d.drive, d.delta)};
+      if (d.ac) b.ac_quiet = median(d.ac.filter((_, i) => flow[i] < QUIET));
+      const F = this.feats(d, b, flow);
+      b.fm = [0,1,2,3,4].map(j => mean(F.map(f => f[j]))); b.fs = [0,1,2,3,4].map(j => Math.max(std(F.map(f => f[j])), 1e-3));
+      this.base[r.id] = b; }
+    this.trained = true;
+  }
+  analyze(st, rainFc) {
+    const n = Math.min(st.length, 14 * DAY), ts = st.ts.slice(-n);
+    const der = this.derived(st, n), flow = st.last("flow", n), rain = st.last("out.rain", n);
+    const win = CONT_H * H, roll = [];
+    for (let i = win - 1; i < n; i++) { let m = Infinity; for (let j = i - win + 1; j <= i; j++) m = Math.min(m, flow[j]); roll.push(m); }
+    const contNow = roll[roll.length - 1], continuous = contNow > CONT_LPM;
+    let leak = continuous ? Math.max(median(roll.slice(-DAY)), contNow) : 0;
+    const night = flow.slice(-DAY).filter((_, i) => { const hr = ts[n - DAY + i].getHours(); return hr >= 1 && hr < 5; });
+    const mnf = pct(night, 10), used = flow.slice(-DAY).reduce((s, v) => s + v, 0) * 15;
+    const rain72 = rain.slice(-72 * H).reduce((s, v) => s + v, 0) * DT;
+    const events = []; for (let i = Math.max(0, n - 7 * DAY); i < n;) { if (rain[i] > 0) { let j = i, mm = 0; while (j < n && rain[j] > 0) mm += rain[j++] * DT; events.push([i, mm]); i = j; } else i++; }
+    let wallWet = false; const rooms = [];
+    for (const room of ROOMS) {
+      const id = room.id, d = der[id], b = this.base[id];
+      const mNow = mean(d.m.slice(-2 * H)), mDev = mNow - b.m_mean, mZ = mDev / b.m_std, mSlope = slopePerDay(d.m.slice(-24 * H));
+      const residNow = mean(this.resid(d, b).slice(-2 * H)), srh12 = mean(d.srh.slice(-12 * H));
+      const hours80 = d.srh.slice(-48 * H).filter(v => v >= MOULD).length * DT, rh24 = mean(d.rh.slice(-24 * H));
+      let acDev = null;
+      if (d.ac) { const q = d.ac.slice(-6 * H).filter((_, i) => flow[n - 6 * H + i] < QUIET); acDev = q.length >= 6 ? median(q) - b.ac_quiet : 0; }
+      const F = this.feats(d, b, flow).slice(-6 * H);
+      const anomaly = F.filter(f => f.some((v, j) => Math.abs((v - b.fm[j]) / b.fs[j]) > 4.5)).length / F.length;
+      if (room.acoustic && mZ >= 2 && mDev > 1) wallWet = true;
+      let rise = null, rpm = null, evMm = null;
+      for (const [s0, mm] of events) { if (s0 < 4 || n - s0 < 4 || mm < 2) continue;
+        const before = mean(d.m.slice(s0 - 4, s0)), after = d.m.slice(s0, Math.min(n, s0 + 24 * H));
+        let mx = -Infinity; for (let i = 0; i + 4 <= after.length; i++) mx = Math.max(mx, mean(after.slice(i, i + 4)));
+        if (rise === null || mx - before > rise) { rise = mx - before; evMm = mm; rpm = rise / mm; } }
+      const f = {m_now: mNow, m_dev: mDev, m_z: mZ, m_slope: mSlope, resid: residNow, srh_12: srh12, hours80, rh_24: rh24, ac_dev: acDev, rise, rise_per_mm: rpm, anomaly};
+      let mt = `Wall moisture ${mNow.toFixed(1)}% vs normal ${b.m_mean.toFixed(1)}%`;
+      if (Math.abs(mSlope) >= .2) mt += ` (${mSlope > 0 ? "rising" : "falling"} ${Math.abs(mSlope).toFixed(1)}%/day)`;
+      const fs = [];
+      if (room.acoustic) { const ev = []; let c = 0; const eAc = acDev >= AC_DB, eWet = mZ >= 3 || (mSlope > 1 && mDev > 1);
+        if (eAc) { c += .35; ev.push(`Pipe noise during quiet hours +${acDev.toFixed(1)} dB above this wall's normal`); }
+        if (continuous) { c += .25; ev.push(`Water flow never dropped below ${contNow.toFixed(2)} L/min for ${CONT_H} h`); }
+        if (eWet) { c += .25; ev.push(mt); }
+        if (residNow > .4) { c += .15; ev.push(`Wall ${residNow.toFixed(1)} °C colder than expected (evaporating water)`); }
+        if (eAc || (eWet && continuous)) fs.push(this.finding("pipe_leak", c, ev)); }
+      if (room.under_terrace && (mZ >= 3 || mDev >= 1.5) && rise !== null && rise >= 1 && srh12 < MOULD && hours80 < 24) {
+        const ev = [mt, `Moisture jumped +${rise.toFixed(1)}% within hours of ${evMm.toFixed(0)} mm rain`]; let c = .8;
+        if (!continuous) { c += .1; ev.push("No continuous water flow, so not a plumbing leak"); }
+        if (srh12 < 75) c += .1;
+        fs.push(this.finding("roof_seepage", c, ev)); }
+      if (srh12 >= MOULD || hours80 >= 24) { const ev = [`Wall-surface humidity ${srh12.toFixed(0)}% over the last 12 h (mould threshold 80%)`]; let c = .4;
+        if (hours80 >= 12) { c += .25; ev.push(`${hours80.toFixed(0)} h above 80% in the last 2 days`); }
+        if (rh24 > 70) { c += .15; ev.push(`Room air humidity ${rh24.toFixed(0)}% (daily mean)`); }
+        if (rise === null || rise < 1) c += .1;
+        if (residNow > .5) { c += .1; ev.push(`Wall ${residNow.toFixed(1)} °C colder than expected (cold spot / thermal bridge)`); }
+        fs.push(this.finding("condensation", c, ev)); }
+      if (!fs.length && anomaly >= .5) fs.push(this.finding("anomaly", .45, [`Anomaly model flags ${(anomaly*100).toFixed(0)}% of the last 6 h as outside the learned normal week`]));
+      for (const fd of fs) this.forecast(fd, f, rainFc, d);
+      rooms.push({id, name: room.name, features: f, findings: fs});
+    }
+    const pipeFound = rooms.some(r => r.findings.some(fd => fd.type === "pipe_leak" && fd.confidence >= .5));
+    if (continuous && !pipeFound) { const ev = [`Water flow never dropped below ${contNow.toFixed(2)} L/min for ${CONT_H} h`]; let c = .45;
+      if (!wallWet) { c += .2; ev.push("No wet wall anywhere, so the water is going down a drain"); }
+      if (mnf > CONT_LPM) { c += .15; ev.push(`Night-time minimum flow ${mnf.toFixed(2)} L/min (should be ~0)`); }
+      const bath = rooms.find(r => r.id === "bathroom"), ac = bath.features.ac_dev || 0;
+      if (ac >= 1 && ac < AC_DB) { c += .15; ev.push(`Faint cistern refill noise in bathroom (+${ac.toFixed(1)} dB)`); }
+      const fd = this.finding("fixture_leak", c, ev);
+      fd.forecast = `Wasting about ${(leak * 1440).toFixed(0)} L/day, roughly ${(leak * 1440 * 30 / 1000).toFixed(1)} kL a month if not fixed.`;
+      bath.findings.push(fd); }
+    const now = ts[n - 1].toISOString(), seen = new Set(), alerts = [];
+    for (const r of rooms) { const f = r.features, d = der[r.id];
+      for (const fd of r.findings) { const key = r.id + ":" + fd.type; seen.add(key);
+        this.firstSeen[key] ||= now; fd.first_seen = this.firstSeen[key]; fd.advice = advise(fd.type, r.name);
+        if (fd.type === "pipe_leak" && continuous) fd.forecast = `${fd.forecast || ""} Losing ~${(leak * 1440).toFixed(0)} L/day.`.trim(); }
+      let pen = Math.max(0, ...r.findings.map(fd => fd.confidence * IMPACT[fd.type])) + 2 * Math.max(0, f.m_z - 2);
+      r.health = Math.max(0, Math.min(100, Math.round(100 - pen)));
+      const top = Math.max(0, ...r.findings.filter(fd => fd.type !== "anomaly").map(fd => fd.confidence));
+      r.status = top >= .6 ? "alert" : r.findings.length ? "watch" : "ok";
+      const L = d.t.length - 1;
+      r.latest = {temp: d.t[L], rh: d.rh[L], wall_temp: d.wall[L], moisture: d.m[L], surface_rh: d.srh[L], dew_point: dewPoint(d.t[L], d.rh[L]), acoustic: d.ac ? d.ac[L] : null};
+      r.anomaly_score = f.anomaly;
+      for (const fd of r.findings) alerts.push({...fd, room: r.id, room_name: r.name}); }
+    for (const k in this.firstSeen) if (!seen.has(k)) delete this.firstSeen[k];
+    alerts.sort((a, b) => b.confidence * IMPACT[b.type] - a.confidence * IMPACT[a.type]);
+    const hs = rooms.map(r => r.health);
+    return { ready: true, sim_time: now,
+      weather: {temp: st.c["out.temp"].at(-1), rh: st.c["out.rh"].at(-1), rain_now: rain[n - 1], rain_72h_mm: rain72, rain_forecast_72h_mm: rainFc},
+      flat: {health: Math.round(.5 * mean(hs) + .5 * Math.min(...hs)), flow_now: flow[n - 1], continuous_flow: continuous, min_flow_4h: contNow,
+        night_min_flow: mnf, leak_lpm: leak, water_loss_l_day: Math.round(leak * 1440), used_last_24h_l: Math.round(used)},
+      rooms, alerts };
+  }
+  finding(type, c, evidence) { c = Math.round(Math.min(.97, c) * 100) / 100; return {type, title: TITLES[type], confidence: c, level: c >= .6 ? "alert" : "watch", evidence}; }
+  forecast(fd, f, rainFc, d) {
+    const m = f.m_now, s = f.m_slope;
+    if (fd.type === "pipe_leak") {
+      if (m >= VISIBLE) fd.forecast = "Wall is already wet enough to show damp patches; act now.";
+      else if (s > .15) { const days = (VISIBLE - m) / s; fd.forecast = `Damp patch likely visible on the wall in ~${days.toFixed(0)} days at the current rate.`; fd.days_to_visible = days; }
+      else fd.forecast = "Wall not wet yet; water may be escaping into the floor or drain.";
+    } else if (fd.type === "roof_seepage") {
+      if (m >= VISIBLE) fd.forecast = "Ceiling is already at visible-stain moisture levels.";
+      else if (rainFc && f.rise_per_mm) { const p = m + f.rise_per_mm * rainFc;
+        fd.forecast = `${rainFc.toFixed(0)} mm rain forecast in 72 h: moisture projected to reach ${p.toFixed(1)}%${p >= VISIBLE ? " - stains likely." : "."}`; }
+      else fd.forecast = `Each 10 mm of rain adds ~${((f.rise_per_mm || 0) * 10).toFixed(1)}% moisture; the next heavy shower will push it further.`;
+    } else if (fd.type === "condensation") {
+      let idx = 0; for (const v of d.srh) idx = v >= MOULD ? idx + DT / 24 / interp(v, [80,85,90,95,100], [42,21,10,5,3]) : Math.max(0, idx - DT / 24 * .02);
+      idx = Math.min(1, idx); const days = (1 - idx) * interp(f.srh_12, [80,85,90,95,100], [42,21,10,5,3]);
+      fd.forecast = `Visible mould expected in ~${days.toFixed(0)} days if conditions continue (growth index ${(idx * 100).toFixed(0)}%).`;
+    } else fd.forecast = "No forecast until the pattern matches a known fault signature.";
+  }
+}
+
+/* ================================================================
+   Building map: port of engine/walls.py. Walls, ArUco markers,
+   camera inspections and the sensor-camera cross-check.
+   ================================================================ */
+const PLAN_X_M = 0.11, PLAN_Y_M = 0.10, WALL_H = 2.9, MARKER_H = 1.5, SIDES = ["north", "east", "south", "west"];
+const PROBES = {
+  living: {wall: "living-north", x_frac: .75, y_m: 2.5}, master: {wall: "master-north", x_frac: .75, y_m: 2.5},
+  bedroom2: {wall: "bedroom2-east", x_frac: .5, y_m: 2.5}, kitchen: {wall: "kitchen-south", x_frac: .3, y_m: .6},
+  bathroom: {wall: "bathroom-west", x_frac: .25, y_m: .4},
+};
+const WET_FAULTS = new Set(["pipe_leak", "roof_seepage", "condensation"]), WET_DEFECTS = new Set(["stain", "mould", "peeling", "damp"]);
+const CRACK_GROWTH_MM = 0.3, CONFIRM_DAYS = 30;
+const WALLS = (() => {
+  const out = []; let marker = 1;
+  for (const r of ROOMS) {
+    const [, , w, h] = r.plan;
+    for (const side of SIDES) {
+      const width = +((side === "north" || side === "south") ? w * PLAN_X_M : h * PLAN_Y_M).toFixed(2), id = `${r.id}-${side}`;
+      const wall = {id, room: r.id, side, width_m: width, height_m: WALL_H, marker_id: marker++, marker_pos: {x_m: +(width / 2).toFixed(2), y_m: MARKER_H}};
+      const p = PROBES[r.id];
+      if (p.wall === id) wall.probe = {x_m: +(width * p.x_frac).toFixed(2), y_m: p.y_m, sensors: ["moisture", "wall_temp", ...(r.acoustic ? ["acoustic"] : [])]};
+      out.push(wall);
+    }
+  }
+  return out;
+})();
+const dayStr = t => new Date(t).toISOString().slice(0, 10);
+const daysBetween = (a, b) => Math.round((Date.parse(b.slice(0, 10)) - Date.parse(a.slice(0, 10))) / 864e5);
+
+function sampleInspections(now) {
+  const d = n => dayStr(now.getTime() - n * 864e5);
+  return [
+    {id: "insp-1", wall: "bedroom2-east", type: "crack", x_m: 1.4, y_m: 1.9, length_m: .8, example: true,
+     history: [{date: d(60), width_mm: .5}, {date: d(30), width_mm: .8}, {date: d(3), width_mm: 1.2}]},
+    {id: "insp-2", wall: "master-north", type: "stain", x_m: 3.4, y_m: 2.55, example: true,
+     history: [{date: d(20), area_cm2: 900}, {date: d(4), area_cm2: 900}]},
+    {id: "insp-3", wall: "kitchen-south", type: "crack", x_m: 2.6, y_m: 1.2, length_m: .4, example: true,
+     history: [{date: d(45), width_mm: .3}, {date: d(2), width_mm: .3}]},
+  ];
+}
+
+function addInspection(list, item, walls) {
+  const wall = walls.find(w => w.id === item.wall || w.marker_id === +item.marker_id);
+  if (!wall) throw new Error("unknown wall or marker_id");
+  const entry = {date: item.date};
+  for (const k of ["width_mm", "area_cm2"]) if (item[k] != null && item[k] !== "") entry[k] = +item[k];
+  const x = +item.x_m, y = +item.y_m;
+  const same = list.find(i => i.wall === wall.id && i.type === item.type && Math.hypot(i.x_m - x, i.y_m - y) <= .15);
+  if (same) { same.history.push(entry); same.history.sort((a, b) => a.date.localeCompare(b.date)); same.example = false; return same; }
+  const add = {id: `insp-${list.length + 1}`, wall: wall.id, type: item.type, x_m: x, y_m: y, history: [entry], example: false};
+  if (item.length_m) add.length_m = +item.length_m;
+  list.push(add); return add;
+}
+
+function crossCheck(state, inspections, walls) {
+  const today = state.sim_time.slice(0, 10), rooms = Object.fromEntries(state.rooms.map(r => [r.id, r]));
+  const byId = Object.fromEntries(walls.map(w => [w.id, w]));
+  const out = inspections.map(ins => {
+    const wall = byId[ins.wall], room = rooms[wall.room], last = ins.history.at(-1), age = daysBetween(last.date, today);
+    let v;
+    if (ins.type === "crack") {
+      const ws = ins.history.filter(h => h.width_mm != null).map(h => h.width_mm), growth = ws.length > 1 ? ws.at(-1) - ws[0] : 0;
+      const span = daysBetween(ins.history[0].date, last.date);
+      v = ws.length < 2 ? {code: "new_crack", level: "watch", text: `New ${ws.at(-1).toFixed(1)} mm crack. Photograph it again in 2 weeks to see if it grows.`}
+        : growth >= CRACK_GROWTH_MM ? {code: "growing", level: "alert", text: `Widened ${growth.toFixed(1)} mm in ${span} days (${ws[0].toFixed(1)} to ${ws.at(-1).toFixed(1)} mm). Recheck in 2 weeks and ask a structural engineer to look.`}
+        : {code: "stable", level: "ok", text: `No change in ${span} days (${ws.at(-1).toFixed(1)} mm). Cosmetic for now; recheck in 3 months.`};
+    } else {
+      const wet = room.findings.filter(f => WET_FAULTS.has(f.type));
+      v = !wall.probe ? {code: "no_sensor", level: "watch", text: "No sensor on this wall. Recheck by photo, or move a moisture probe here."}
+        : wet.length && age <= CONFIRM_DAYS ? {code: "confirmed", level: "alert", text: `Sensors and camera agree: ${wet[0].title.toLowerCase()} on this wall.`}
+        : room.features.m_z < 2 ? {code: "old_stain", level: "watch", text: "Sensors read dry here, so this is likely an old stain. Fix the cause it came from, then repaint."}
+        : {code: "wet", level: "watch", text: "Wall moisture is above normal. Keep watching."};
+    }
+    return {...ins, room: wall.room, marker_id: wall.marker_id, age_days: age, verdict: v};
+  });
+  const links = {};
+  for (const r of state.rooms) for (const f of r.findings) {
+    if (!WET_FAULTS.has(f.type)) continue;
+    const wall = byId[PROBES[r.id].wall];
+    const seen = out.filter(i => i.wall === wall.id && WET_DEFECTS.has(i.type) && i.age_days <= CONFIRM_DAYS);
+    links[`${r.id}:${f.type}`] = seen.length
+      ? {code: "confirmed", wall: wall.id, marker_id: wall.marker_id, text: `Confirmed by camera on ${seen.at(-1).history.at(-1).date}.`}
+      : {code: "photograph", wall: wall.id, marker_id: wall.marker_id, text: `Next: photograph the ${wall.side} wall (marker #${wall.marker_id}) to confirm.`};
+  }
+  return {inspections: out, sensor_links: links};
+}
+
+/* ================================================================
+   Data source: Python server if reachable, otherwise browser engine
+   ================================================================ */
+function browserSource() {
+  const start = new Date(); start.setHours(0, 0, 0, 0); start.setDate(start.getDate() - 8);
+  let sim, store, det, speed = 4, paused = false;
+  const boot = () => {
+    sim = new FlatSimulator(20261021, start); store = new Store(); det = new Detector();
+    for (let i = 0; i < 8 * DAY; i++) store.append(sim.step());
+    det.train(store);
+  };
+  boot();
+  // example scenario so the first screen shows the system working
+  for (let i = 0; i < 6 * H; i++) store.append(sim.step());
+  sim.inject("pipe_leak", "bathroom", 1.0);
+  for (let i = 0; i < 9 * H; i++) store.append(sim.step());
+  let state;
+  const inspections = sampleInspections(sim.t);
+  const refresh = () => {
+    state = det.analyze(store, sim.rainForecast());
+    Object.assign(state, {mode: "browser", speed, paused, injected: sim.injected()});
+    state.walls = crossCheck(state, inspections, WALLS);
+  };
+  refresh();
+  return {
+    kind: "browser", rooms: ROOMS, faults: FAULTS, walls: WALLS,
+    addInspection(item) { addInspection(inspections, {...item, date: item.date || state.sim_time.slice(0, 10)}, WALLS); refresh(); return Promise.resolve(); },
+    tick() { if (!paused) { for (let i = 0; i < speed; i++) store.append(sim.step()); refresh(); } return Promise.resolve(state); },
+    state: () => Promise.resolve(state),
+    history(room, hours = 72) { const n = Math.min(store.length, hours * H), t = store.c[room + ".temp"].slice(-n), rh = store.c[room + ".rh"].slice(-n), w = store.c[room + ".wall_temp"].slice(-n);
+      return Promise.resolve({ts: store.ts.slice(-n), moisture: store.c[room + ".moisture"].slice(-n), surface_rh: t.map((v, i) => srhOf(v, rh[i], w[i])),
+        flow: store.c.flow.slice(-n), rain: store.c["out.rain"].slice(-n), acoustic: store.c[room + ".acoustic"]?.slice(-n)}); },
+    inject(t, r) { sim.inject(t, r); refresh(); return Promise.resolve(); },
+    clear() { sim.faults = []; refresh(); return Promise.resolve(); },
+    setSpeed(s) { speed = s; refresh(); return Promise.resolve(); },
+    setPaused(p) { paused = p; refresh(); return Promise.resolve(); },
+  };
+}
+
+async function serverSource() {
+  const ctl = new AbortController(); setTimeout(() => ctl.abort(), 2500);
+  const cfg = await fetch("api/config", {signal: ctl.signal}).then(r => { if (!r.ok) throw 0; return r.json(); });
+  const post = (p, b) => fetch(p, {method: "POST", headers: {"Content-Type": "application/json"}, body: JSON.stringify(b || {})}).then(r => r.json());
+  const get = p => fetch(p).then(r => r.json());
+  return {
+    kind: "server", rooms: cfg.rooms, faults: cfg.faults, walls: cfg.walls,
+    addInspection: async item => { const r = await post("api/inspections", item); if (!r.ok) throw new Error(r.error); },
+    tick: () => get("api/state"), state: () => get("api/state"),
+    history: async (room, hours = 72) => { const h = await get(`api/history?room=${room}&hours=${hours}`); h.ts = h.ts.map(x => new Date(x)); return h; },
+    inject: (t, r) => post("api/simulate/fault", {type: t, room: r}),
+    clear: () => post("api/simulate/clear"),
+    setSpeed: s => post("api/simulate/speed", {steps_per_tick: s}),
+    setPaused: p => post("api/simulate/pause", {paused: p}),
+  };
+}
+
+/* ================================================================
+   UI
+   ================================================================ */
+const $ = id => document.getElementById(id);
+const NS = "http://www.w3.org/2000/svg";
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const fmt = (v, d = 1) => v == null || isNaN(v) ? "–" : Number(v).toFixed(d);
+let src, S, selected = "bathroom", lastHistKey = "";
+
+function statusOf(h) { return h >= 80 ? "ok" : h >= 55 ? "watch" : "alert"; }
+function relTime(fromIso, toIso) {
+  const m = Math.max(0, (new Date(toIso) - new Date(fromIso)) / 60000);
+  return m < 60 ? `${Math.round(m)} min` : m < 2880 ? `${(m / 60).toFixed(m < 600 ? 1 : 0)} h` : `${(m / 1440).toFixed(1)} days`;
+}
+function clockText(iso) { const d = new Date(iso); return d.toLocaleString("en-IN", {weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit", hour12: false}); }
+
+function renderSummary() {
+  const f = S.flat, w = S.weather, st = statusOf(f.health);
+  $("s-health").className = "v " + st; $("s-health").innerHTML = `${f.health}<small>/100</small>`;
+  const nA = S.alerts.filter(a => a.level === "alert").length, nW = S.alerts.length - nA;
+  $("s-health-s").textContent = nA ? `${nA} problem${nA > 1 ? "s" : ""} found` : nW ? `${nW} to watch` : "No problems detected";
+  $("s-flow").innerHTML = `${fmt(f.flow_now, 2)}<small>L/min</small>`;
+  $("s-flow-s").textContent = `${(f.used_last_24h_l || 0).toLocaleString("en-IN")} L used in 24 h`;
+  $("s-loss").className = "v " + (f.continuous_flow ? "alert" : "ok");
+  $("s-loss").innerHTML = f.continuous_flow ? `${f.water_loss_l_day.toLocaleString("en-IN")}<small>L/day</small>` : `0<small>L/day</small>`;
+  $("s-loss-s").textContent = f.continuous_flow ? `Flow never stopped for ${CONT_H} h` : "Meter rests at zero overnight";
+  $("s-wx").innerHTML = `${fmt(w.temp, 0)}<small>°C · ${fmt(w.rh, 0)}% RH</small>`;
+  $("s-wx-s").textContent = (w.rain_now ? `Raining ${fmt(w.rain_now, 0)} mm/h · ` : "") + (w.rain_forecast_72h_mm != null ? `${fmt(w.rain_forecast_72h_mm, 0)} mm rain due in 72 h` : `${fmt(w.rain_72h_mm, 0)} mm rain in 72 h`);
+  $("clock").textContent = clockText(S.sim_time);
+  $("mode").textContent = {browser: "Browser demo", simulation: "Server · simulation", live: "Server · live sensors"}[S.mode] || S.mode;
+  $("pause").textContent = S.paused ? "Resume" : "Pause";
+  document.querySelectorAll("#speed button").forEach(b => b.setAttribute("aria-pressed", String(+b.dataset.s === S.speed)));
+  $("sim-panel").hidden = S.mode === "live";
+}
+
+/* a point `frac` of the way along a wall, read left to right while facing it from inside the room, inset into the room */
+function wallPoint(room, side, frac, inset, X, Y) {
+  const [x, y, w, h] = room.plan;
+  if (side === "north") return [X(x + w * frac), Y(y) + inset];
+  if (side === "east") return [X(x + w) - inset, Y(y + h * frac)];
+  if (side === "south") return [X(x + w * (1 - frac)), Y(y + h) - inset];
+  return [X(x) + inset, Y(y + h * (1 - frac))];
+}
+const pinNo = id => (S.walls?.inspections || []).findIndex(i => i.id === id) + 1;
+const cap = s => s[0].toUpperCase() + s.slice(1);
+const sizeText = i => {
+  const ws = i.history.filter(h => h.width_mm != null).map(h => h.width_mm.toFixed(1));
+  if (ws.length) return `${ws.join(" → ")} mm wide`;
+  const a = i.history.at(-1).area_cm2; return a != null ? `${Math.round(a)} cm²` : "size not measured";
+};
+
+function wallSvg(wall, items, sensorAlert) {
+  const SC = 44, pad = 16, W = wall.width_m * SC + pad * 2, Hh = wall.height_m * SC + pad + 22;
+  const X = m => pad + m * SC, Y = m => pad + (wall.height_m - m) * SC;
+  let s = `<svg viewBox="0 0 ${W.toFixed(0)} ${Hh.toFixed(0)}" width="${W.toFixed(0)}" role="img" aria-label="${cap(wall.side)} wall, ${wall.width_m} m wide">`;
+  s += `<rect class="w-face" x="${X(0)}" y="${Y(wall.height_m)}" width="${wall.width_m * SC}" height="${wall.height_m * SC}"></rect>`;
+  s += `<line class="w-floor" x1="${X(0) - 4}" x2="${X(wall.width_m) + 4}" y1="${Y(0)}" y2="${Y(0)}"></line>`;
+  s += `<text class="w-label" x="${X(0)}" y="${Hh - 4}">0</text><text class="w-label" x="${X(wall.width_m)}" y="${Hh - 4}" text-anchor="end">${wall.width_m} m</text>`;
+  const mx = X(wall.marker_pos.x_m), my = Y(wall.marker_pos.y_m);
+  s += `<rect class="w-marker" x="${mx - 6}" y="${my - 6}" width="12" height="12"></rect><rect class="w-ink" x="${mx - 4}" y="${my - 4}" width="4" height="4"></rect><rect class="w-ink" x="${mx}" y="${my}" width="4" height="4"></rect>`;
+  s += `<text class="w-label" x="${mx}" y="${my + 18}" text-anchor="middle">#${wall.marker_id}</text>`;
+  if (wall.probe) {
+    const px = X(wall.probe.x_m), py = Y(wall.probe.y_m);
+    if (sensorAlert) s += `<circle class="pulse" cx="${px}" cy="${py}" r="9"></circle>`;
+    s += `<circle class="probe" cx="${px}" cy="${py}" r="4.5"></circle><text class="w-label" x="${px + 8}" y="${py - 6}">probe</text>`;
+  }
+  for (const it of items) {
+    const cx = X(it.x_m), cy = Y(it.y_m);
+    if (it.type === "crack") {
+      const L = (it.length_m || .4) * SC, x0 = cx - L / 2;
+      s += `<polyline class="w-crack" points="${x0},${cy - 5} ${x0 + L * .3},${cy + 3} ${x0 + L * .55},${cy - 2} ${x0 + L * .8},${cy + 6} ${x0 + L},${cy + 2}"></polyline>`;
+    } else {
+      const a = it.history.at(-1).area_cm2 || 200, rad = Math.sqrt(a / Math.PI) / 100 * SC;
+      s += `<ellipse class="w-stain" cx="${cx}" cy="${cy}" rx="${rad * 1.3}" ry="${rad * .8}"></ellipse>`;
+    }
+    s += `<g class="pin ${it.verdict.level}"><circle cx="${cx}" cy="${cy - 12}" r="7"></circle><text x="${cx}" y="${cy - 9}" text-anchor="middle">${pinNo(it.id)}</text></g>`;
+  }
+  return s + `</svg>`;
+}
+
+function renderWalls() {
+  const room = S.rooms.find(x => x.id === selected);
+  const all = S.walls?.inspections || [], links = S.walls?.sensor_links || {};
+  const sensorWet = room.findings.filter(f => WET_FAULTS.has(f.type));
+  const walls = src.walls.filter(w => w.room === selected)
+    .map(w => ({w, items: all.filter(i => i.wall === w.id)}))
+    .sort((a, b) => (b.w.probe ? 2 : 0) + b.items.length - ((a.w.probe ? 2 : 0) + a.items.length));
+  $("walls").innerHTML = walls.map(({w, items}) => {
+    const alert = w.probe && sensorWet.length;
+    const level = items.some(i => i.verdict.level === "alert") || alert ? "alert" : items.some(i => i.verdict.level === "watch") ? "watch" : "";
+    const rows = [];
+    if (w.probe) for (const f of sensorWet) {
+      const L = links[`${selected}:${f.type}`];
+      rows.push(`<li><span class="num probe-n">S</span><span><b>Sensors:</b> ${esc(f.title.toLowerCase())}. ${L ? esc(L.text) : ""}</span></li>`);
+    }
+    for (const i of items) rows.push(`<li><span class="num ${i.verdict.level}">${pinNo(i.id)}</span><span><b>${cap(i.type)}</b>, ${sizeText(i)}. ${esc(i.verdict.text)}</span></li>`);
+    return `<div class="wallcard ${level}"><h4>${cap(w.side)} wall<span>${w.id} · marker #${w.marker_id}${w.probe ? " · probe" : ""}</span></h4>
+      ${wallSvg(w, items, alert)}
+      ${rows.length ? `<ul class="w-list">${rows.join("")}</ul>` : `<p class="w-none">Nothing found. Photograph with marker #${w.marker_id} in frame to inspect.</p>`}</div>`;
+  }).join("");
+}
+
+function renderInspections() {
+  const list = S.walls?.inspections || [];
+  $("insp").innerHTML = list.length ? list.map(i => {
+    const w = src.walls.find(v => v.id === i.wall), rn = src.rooms.find(r => r.id === i.room).name;
+    return `<div class="insp-row">
+      <div><button class="linkish" type="button" data-room="${i.room}"><span class="num ${i.verdict.level}">${pinNo(i.id)}</span>${esc(rn)}, ${w.side} wall</button>
+        <span class="hint">marker #${i.marker_id} · ${i.x_m} m from left · ${i.y_m} m up</span></div>
+      <div>${cap(i.type)} <span class="hint">${sizeText(i)}</span></div>
+      <div class="verdict"><span class="pill ${i.verdict.level}">${{alert: "Act", watch: "Watch", ok: "OK"}[i.verdict.level]}</span><span>${esc(i.verdict.text)}</span>
+        <span class="hint">Last photo ${i.history.at(-1).date}${i.example ? ` <span class="tag">example</span>` : ""}</span></div></div>`;
+  }).join("") : `<div class="empty">No camera findings yet.</div>`;
+  $("insp").querySelectorAll("button[data-room]").forEach(b => b.addEventListener("click", () => {
+    selected = b.dataset.room; lastHistKey = ""; render(); $("room-title").scrollIntoView({behavior: "smooth", block: "start"}); }));
+  const sel = $("lf-wall");
+  if (!sel.options.length) {
+    sel.innerHTML = src.walls.map(w => `<option value="${w.id}">${esc(src.rooms.find(r => r.id === w.room).name)}, ${w.side} (#${w.marker_id})</option>`).join("");
+    sel.value = "bathroom-west";
+    $("lf-type").addEventListener("change", () => { $("lf-w").required = $("lf-type").value === "crack"; });
+    $("logform").addEventListener("submit", async e => {
+      e.preventDefault();
+      const item = {wall: sel.value, type: $("lf-type").value, x_m: +$("lf-x").value, y_m: +$("lf-y").value};
+      if ($("lf-w").value) item.width_mm = +$("lf-w").value;
+      try { await src.addInspection(item); $("lf-msg").textContent = `Logged on ${item.wall}.`; }
+      catch (err) { $("lf-msg").textContent = `Not logged: ${err.message}`; return; }
+      selected = src.walls.find(w => w.id === item.wall).room; lastHistKey = ""; S = await src.state(); render();
+    });
+  }
+}
+
+function renderPlan() {
+  const svg = $("plan"); svg.innerHTML = "";
+  const X = v => 10 + v * 3.8, Y = v => 10 + v * 2.7;
+  const byId = Object.fromEntries(S.rooms.map(r => [r.id, r]));
+  for (const room of src.rooms) {
+    const r = byId[room.id]; if (!r) continue;
+    const [x, y, w, h] = room.plan, cls = r.status;
+    const g = document.createElementNS(NS, "g");
+    g.innerHTML = `<rect class="room-rect ${cls}${room.id === selected ? " sel" : ""}" x="${X(x)}" y="${Y(y)}" width="${w * 3.8}" height="${h * 2.7}" tabindex="0" role="button" aria-label="${esc(room.name)}, health ${r.health}"></rect>
+      <text class="room-name" x="${X(x) + 8}" y="${Y(y) + 18}">${esc(room.name)}</text>
+      <text class="room-hp ${cls}" x="${X(x) + 8}" y="${Y(y) + 42}">${r.health}</text>
+      <text class="room-sub" x="${X(x) + 8}" y="${Y(y) + 58}">${fmt(r.latest.moisture)}% wall</text>
+      <text class="room-sub" x="${X(x) + 8}" y="${Y(y) + 70}">${fmt(r.latest.surface_rh, 0)}% surface RH</text>`;
+    const pw = src.walls.find(wl => wl.room === room.id && wl.probe);
+    if (pw) {
+      const [px, py] = wallPoint(room, pw.side, pw.probe.x_m / pw.width_m, 9, X, Y);
+      if (r.status === "alert") g.innerHTML += `<circle class="pulse" cx="${px}" cy="${py}" r="9"></circle>`;
+      g.innerHTML += `<circle class="probe" cx="${px}" cy="${py}" r="4.5"></circle>`;
+      if (room.acoustic) g.innerHTML += `<text class="room-sub" x="${px + 8}" y="${py + 3}">mic</text>`;
+    }
+    for (const ins of (S.walls?.inspections || []).filter(i => i.room === room.id)) {
+      const wl = src.walls.find(v => v.id === ins.wall);
+      const [cx, cy] = wallPoint(room, wl.side, ins.x_m / wl.width_m, 3, X, Y);
+      g.innerHTML += `<rect class="cam ${ins.verdict.level}" x="${cx - 4.5}" y="${cy - 4.5}" width="9" height="9"><title>${esc(ins.type)} on ${esc(ins.wall)}</title></rect>`;
+    }
+    const rect = g.querySelector("rect");
+    const pick = () => { selected = room.id; lastHistKey = ""; render(); };
+    rect.addEventListener("click", pick);
+    rect.addEventListener("keydown", e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(); } });
+    svg.appendChild(g);
+  }
+  svg.insertAdjacentHTML("beforeend", `<g><rect x="${X(0) - 2}" y="${Y(100) + 6}" width="62" height="16" rx="3" fill="var(--sunk)"></rect><text class="room-sub" x="${X(0) + 4}" y="${Y(100) + 17}">water meter</text></g>`);
+}
+
+function renderFindings() {
+  const box = $("findings");
+  $("f-count").textContent = S.alerts.length ? `${S.alerts.length} active` : "";
+  if (!S.alerts.length) { box.innerHTML = `<div class="empty">Every room matches its learned normal week. Inject a fault below to see detection.</div>`; return; }
+  const open = new Set([...box.querySelectorAll("details[open]")].map(d => d.dataset.k));
+  box.innerHTML = S.alerts.map(a => {
+    const k = a.room + ":" + a.type, ad = a.advice;
+    return `<article class="finding ${a.level}">
+      <div class="f-top"><h3>${esc(a.title)}</h3><span class="pill ${a.level}">${a.level === "alert" ? "Problem" : "Watch"}</span></div>
+      <div class="f-meta"><b>${esc(a.room_name)}</b>
+        <span class="conf">Confidence <i><b style="width:${a.confidence * 100}%"></b></i><span class="mono">${Math.round(a.confidence * 100)}%</span></span>
+        <span>Detected ${relTime(a.first_seen, S.sim_time)} ago</span></div>
+      <ul class="evidence">${a.evidence.map(e => `<li>${esc(e)}</li>`).join("")}</ul>
+      ${a.forecast ? `<div class="forecast">${esc(a.forecast)}</div>` : ""}
+      ${S.walls?.sensor_links?.[k] ? `<div class="cam-link ${S.walls.sensor_links[k].code}">${esc(S.walls.sensor_links[k].text)}</div>` : ""}
+      <details class="advice" data-k="${k}"${open.has(k) ? " open" : ""}><summary>What to do · ${esc(ad.urgency)} urgency</summary>
+        <dl><dt>Likely cause</dt><dd>${esc(ad.cause)}</dd><dt>Do this</dt><dd>${esc(ad.action)}</dd><dt>Who to call</dt><dd>${esc(ad.who)}</dd><dt>If ignored</dt><dd>${esc(ad.ignore)}</dd></dl></details>
+    </article>`;
+  }).join("");
+}
+
+function renderReadings() {
+  const r = S.rooms.find(x => x.id === selected), L = r.latest;
+  $("room-title").textContent = r.name;
+  const items = [["Wall moisture", fmt(L.moisture), "%"], ["Wall surface RH", fmt(L.surface_rh, 0), "%"], ["Wall temp", fmt(L.wall_temp), "°C"],
+    ["Air temp", fmt(L.temp), "°C"], ["Air humidity", fmt(L.rh, 0), "%"], ["Dew point", fmt(L.dew_point), "°C"]];
+  if (L.acoustic != null) items.push(["Pipe noise", fmt(L.acoustic), "dB"]);
+  items.push(["Anomaly level", Math.round(r.anomaly_score * 100), "%"]);
+  $("readings").innerHTML = items.map(([k, v, u]) => `<div class="rd"><div class="k">${k}</div><div class="v">${v}<small> ${u}</small></div></div>`).join("");
+}
+
+function lineChart(el, ts, vals, o) {
+  const W = Math.max(260, el.clientWidth || 300), Hh = 130, pl = 34, pr = 8, pt = 8, pb = 18, iw = W - pl - pr, ih = Hh - pt - pb;
+  let lo = Math.min(...vals, o.thr ?? Infinity, o.min ?? Infinity), hi = Math.max(...vals, o.thr ?? -Infinity, o.max ?? -Infinity);
+  const pad = (hi - lo) * .1 || 1; lo = o.floor0 ? 0 : Math.floor(lo - pad); hi = Math.ceil(hi + pad);
+  const x = i => pl + iw * i / (vals.length - 1), y = v => pt + ih * (1 - (v - lo) / (hi - lo));
+  let s = `<svg viewBox="0 0 ${W} ${Hh}" preserveAspectRatio="none" style="height:${Hh}px" role="img" aria-label="${esc(o.label)}">`;
+  if (o.rain) { let i = 0; while (i < o.rain.length) { if (o.rain[i] > 0) { let j = i; while (j < o.rain.length && o.rain[j] > 0) j++; s += `<rect class="rainband" x="${x(i)}" y="${pt}" width="${Math.max(2, x(j - 1) - x(i))}" height="${ih}"></rect>`; i = j; } else i++; } }
+  for (let k = 0; k <= 2; k++) { const v = lo + (hi - lo) * k / 2; s += `<line class="grid-l" x1="${pl}" x2="${W - pr}" y1="${y(v)}" y2="${y(v)}"></line><text class="axis" x="${pl - 5}" y="${y(v) + 3}" text-anchor="end">${+v.toFixed(o.dp ?? 0)}</text>`; }
+  ts.forEach((t, i) => { if (t.getHours() === 0 && t.getMinutes() === 0 && i > 0) s += `<line class="grid-l" x1="${x(i)}" x2="${x(i)}" y1="${pt + ih}" y2="${pt + ih + 4}"></line><text class="axis" x="${x(i)}" y="${Hh - 3}" text-anchor="middle">${t.toLocaleDateString("en-IN", {weekday: "short"})}</text>`; });
+  if (o.thr != null && o.thr <= hi) s += `<line class="thr" x1="${pl}" x2="${W - pr}" y1="${y(o.thr)}" y2="${y(o.thr)}"></line><text class="thr-t" x="${W - pr}" y="${y(o.thr) - 4}" text-anchor="end">${esc(o.thrLabel)}</text>`;
+  const pts = vals.map((v, i) => `${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(" ");
+  s += `<polygon class="area" points="${pl},${pt + ih} ${pts} ${W - pr},${pt + ih}"></polygon><polyline class="series" points="${pts}"></polyline>`;
+  s += `<circle class="endpt" cx="${x(vals.length - 1)}" cy="${y(vals.at(-1))}" r="4"></circle><line class="xh" id="xh" y1="${pt}" y2="${pt + ih}" visibility="hidden"></line></svg>`;
+  el.innerHTML = `<h4>${esc(o.label)}<span>${fmt(vals.at(-1), o.dp ?? 1)} ${o.unit}</span></h4>${s}<div class="tip" hidden></div>`;
+  const svg = el.querySelector("svg"), tip = el.querySelector(".tip"), xh = el.querySelector("#xh");
+  svg.addEventListener("pointermove", e => {
+    const b = svg.getBoundingClientRect(), px = (e.clientX - b.left) * W / b.width;
+    const i = Math.max(0, Math.min(vals.length - 1, Math.round((px - pl) / iw * (vals.length - 1))));
+    xh.setAttribute("x1", x(i)); xh.setAttribute("x2", x(i)); xh.setAttribute("visibility", "visible");
+    tip.hidden = false; tip.style.left = `${x(i) * b.width / W}px`; tip.style.top = `${y(vals[i]) * b.height / Hh + 18}px`;
+    tip.textContent = `${clockText(ts[i])} · ${fmt(vals[i], o.dp ?? 1)} ${o.unit}`;
+  });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; xh.setAttribute("visibility", "hidden"); });
+}
+
+async function renderCharts() {
+  const key = selected + S.sim_time; if (key === lastHistKey) return; lastHistKey = key;
+  const h = await src.history(selected, 72), box = $("charts");
+  const specs = [["moisture", {label: "Wall moisture", unit: "%", thr: VISIBLE, thrLabel: "visible damp 20%"}],
+    ["surface_rh", {label: "Wall surface humidity", unit: "%", thr: MOULD, thrLabel: "mould risk 80%", dp: 0, max: 85}]];
+  if (h.acoustic) specs.push(["acoustic", {label: "Pipe noise", unit: "dB"}]);
+  specs.push(["flow", {label: "Water meter (whole flat)", unit: "L/min", dp: 2, floor0: true}]);
+  if (box.children.length !== specs.length) box.innerHTML = specs.map(() => `<div class="chart"></div>`).join("");
+  specs.forEach(([k, o], i) => lineChart(box.children[i], h.ts, h[k], {...o, rain: h.rain}));
+}
+
+function renderSim() {
+  const box = $("inject");
+  if (!box.dataset.built) {
+    box.innerHTML = Object.entries(src.faults).map(([t, f]) => `<div class="inj"><b>${esc(f.label)}</b><p>${esc(FAULT_DESC[t] || "")}</p>
+      <div class="inj-row"><select id="room-${t}" aria-label="Room for ${esc(f.label)}">${f.rooms.map(r => `<option value="${r}">${esc(src.rooms.find(x => x.id === r).name)}</option>`).join("")}</select>
+      <button class="btn" type="button" data-t="${t}">Inject</button></div></div>`).join("");
+    box.querySelectorAll("button[data-t]").forEach(b => b.addEventListener("click", async () => {
+      const t = b.dataset.t, r = $("room-" + t).value; await src.inject(t, r); selected = r; lastHistKey = ""; S = await src.state(); render(); }));
+    box.dataset.built = "1";
+  }
+  const inj = S.injected || [];
+  $("truth").innerHTML = `<span class="hint">Hidden from the AI:</span>` + (inj.length
+    ? inj.map(f => `<span class="t">${esc(f.label)} · ${esc(f.room_name)} · since ${relTime(f.since, S.sim_time)}</span>`).join("") + `<button class="btn ghost" type="button" id="clear">Clear faults</button>`
+    : `<span class="t">no faults injected</span>`);
+  $("clear")?.addEventListener("click", async () => { await src.clear(); S = await src.state(); render(); });
+  const b = $("banner");
+  if (S.mode === "browser") { b.hidden = false; b.innerHTML = `<b>Demo scenario</b><span>A hidden bathroom pipe leak was injected at 06:00 on the first day. The flat's clock runs at 1 simulated hour per second. To see the camera confirm it, log a stain on the bathroom west wall under Wall inspections.</span>`; }
+  else b.hidden = true;
+}
+
+function render() { if (!S || !S.ready) return; renderSummary(); renderPlan(); renderFindings(); renderReadings(); renderCharts(); renderWalls(); renderInspections(); renderSim(); }
+
+async function main() {
+  try { src = await serverSource(); } catch { src = browserSource(); }
+  $("pause").addEventListener("click", async () => { await src.setPaused(!S.paused); S = await src.state(); render(); });
+  document.querySelectorAll("#speed button").forEach(b => b.addEventListener("click", async () => { await src.setSpeed(+b.dataset.s); S = await src.state(); render(); }));
+  S = await src.state(); render();
+  setInterval(async () => { try { S = await src.tick(); render(); } catch (e) { console.error(e); } }, 1000);
+  addEventListener("resize", () => { lastHistKey = ""; renderCharts(); });
+}
+main();
+</script>
+</html>

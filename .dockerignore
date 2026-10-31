@@ -1,0 +1,30 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Datasets: 189 MB of BD3 and house-wall-damage. Training data, not runtime.
+data/
+
+# Training checkpoints and logs. The vision build copies in only the three
+# weights it actually needs, by name, from models/.
+models/*.log
+models/*.json
+models/_*.pt
+models/bd3_random.pt
+models/defect_resnet18.pt
+
+# The retired React app.
+web/node_modules/
+web/src/
+web/dist/
+web/package*.json
+web/vite.config.js
+web/index.html
+app.py
+
+# Local only
+.kilo/
+*.db

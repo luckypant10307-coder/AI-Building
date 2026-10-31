@@ -18,8 +18,21 @@ MIN_ANOMALY_FRACTION = 0.05
 STANDALONE_CONFIDENCE = 0.80
 
 
-def fuse(rule_result, anomaly_fraction, forecast, learned_prob=None):
-    """Turn the detectors' separate opinions into one alert."""
+WETTING_KINDS = ("hidden_pipe_leak", "roof_seepage", "condensation")
+
+
+def fuse(rule_result, anomaly_fraction, forecast, learned_prob=None, photo=None):
+    """Turn the detectors' separate opinions into one alert.
+
+    `photo` is the camera side: {damp_probability, crack_mm, crack_growth_mm}.
+
+    It can only ever corroborate, never cancel. A wall photograph showing no
+    stain does not mean the wall is dry -- the sensors are reading moisture
+    inside the plaster and the whole claim of this product is that they see it
+    days before anything shows on the surface. Letting a clean photo suppress a
+    sensor alert would invert that. So a confirming photo raises urgency and a
+    silent one changes nothing.
+    """
     best = rule_result["best"]
     confidence = best["confidence"]
 
@@ -48,6 +61,26 @@ def fuse(rule_result, anomaly_fraction, forecast, learned_prob=None):
     else:
         level = "watch"
 
+    evidence = list(best["evidence_for"])
+    corroboration = "no photo"
+    if photo:
+        corroboration = "photo read, but no damp classifier loaded"
+        damp = photo.get("damp_probability")
+        if damp is not None and best["kind"] in WETTING_KINDS:
+            if damp >= 0.5:
+                corroboration = "photo confirms damp on the surface"
+                evidence.append(corroboration)
+                # already visible, so it is no longer a thing to watch
+                if level == "watch":
+                    level = "action"
+            else:
+                corroboration = "nothing visible yet (expected this early)"
+        growth_mm = photo.get("crack_growth_mm")
+        if growth_mm is not None and growth_mm > 0.2:
+            evidence.append(f"crack widened {growth_mm:.1f} mm since last visit")
+            if level == "watch":
+                level = "action"
+
     return {
         "level": level,
         "kind": best["kind"],
@@ -56,8 +89,9 @@ def fuse(rule_result, anomaly_fraction, forecast, learned_prob=None):
         "needs_technician_confirmation": level == "urgent"
         or (level == "action" and confidence < STANDALONE_CONFIDENCE),
         "days_to_damage": days,
-        "evidence_for": best["evidence_for"],
+        "evidence_for": evidence,
         "evidence_against": best["evidence_against"],
+        "photo_corroboration": corroboration,
     }
 
 

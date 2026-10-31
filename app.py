@@ -1,37 +1,45 @@
-"""Flask backend and dashboard for Smart Property AI.
+"""Flask backend for Smart Property AI, serving the React UI in web/dist.
 
     python app.py                 then open http://127.0.0.1:5000
 
+For UI work, run Vite's dev server alongside it:
+
+    cd web && npm run dev         http://127.0.0.1:5173, /api proxied here
+
 Endpoints
-    GET  /                 the dashboard
-    GET  /api/alerts       analyse whatever readings are currently loaded
-    POST /api/ingest       append readings  {"readings": [ {...}, ... ]}
-    POST /api/demo         load a simulated flat  {"fault": ..., "room": ...}
+    GET    /                 the React app (built)
+    GET    /api/components   which of the ten components are live
+    POST   /api/demo         load a simulated flat
+    POST   /api/ingest       append real readings
+    GET    /api/alerts       analyse what is loaded
+    POST   /api/photo        attach a wall photo to one room (multipart)
+    DELETE /api/photo        remove a room's photo
 """
 
 import warnings
 
+import numpy as np
 import pandas as pd
-from flask import Flask, jsonify, render_template_string, request
+from flask import Flask, jsonify, request, send_from_directory
 
 warnings.filterwarnings("ignore")
 
+from smart_property import registry
 from smart_property.config import FAULT_KINDS, ROOMS, SENSORS
 from smart_property.pipeline import analyse_flat
 from smart_property.simulator import simulate
 
-app = Flask(__name__)
+DIST = "web/dist"
+app = Flask(__name__, static_folder=DIST, static_url_path="")
 
-# A prototype keeps its readings in memory. A real deployment would write them
-# to a time-series store and analyse a rolling window.
-STORE = {"readings": None}
+# A prototype keeps its state in memory. A deployment would use a time-series
+# store for readings and object storage for photographs.
+STORE = {"readings": None, "photos": {}, "previous": {}}
 
 REQUIRED = {"ts", "room", *SENSORS}
 
 
-def _load(df):
-    STORE["readings"] = df
-
+# ----------------------------------------------------------------- readings
 
 @app.post("/api/ingest")
 def ingest():
@@ -39,7 +47,6 @@ def ingest():
     rows = payload.get("readings")
     if not rows:
         return jsonify({"error": "send {'readings': [...]}"}), 400
-
     frame = pd.DataFrame(rows)
     missing = REQUIRED - set(frame.columns)
     if missing:
@@ -47,7 +54,6 @@ def ingest():
     frame["ts"] = pd.to_datetime(frame["ts"])
     if "rain_mm_h" not in frame:
         frame["rain_mm_h"] = 0.0
-
     current = STORE["readings"]
     STORE["readings"] = frame if current is None else pd.concat(
         [current, frame], ignore_index=True)
@@ -60,14 +66,58 @@ def demo():
     fault = payload.get("fault") or None
     if fault and fault not in FAULT_KINDS:
         return jsonify({"error": f"fault must be one of {FAULT_KINDS}"}), 400
-    _load(simulate(
+    STORE["readings"] = simulate(
         seed=int(payload.get("seed", 3)),
         days=int(payload.get("days", 18)),
         fault_kind=fault,
         room=payload.get("room", "bathroom") if fault else None,
         start_day=float(payload.get("start_day", 9.0)),
-    ))
+    )
     return jsonify({"ok": True, "fault": fault, "room": payload.get("room")})
+
+
+# -------------------------------------------------------------------- photos
+
+@app.post("/api/photo")
+def add_photo():
+    import cv2
+
+    room = request.form.get("room")
+    if room not in ROOMS:
+        return jsonify({"error": f"room must be one of {ROOMS}"}), 400
+    upload = request.files.get("photo")
+    if upload is None:
+        return jsonify({"error": "attach a file under the 'photo' field"}), 400
+
+    data = np.frombuffer(upload.read(), np.uint8)
+    image = cv2.imdecode(data, cv2.IMREAD_COLOR)
+    if image is None:
+        return jsonify({"error": "could not decode that image"}), 400
+
+    # replacing a photo keeps the old one, so crack growth between two visits
+    # can be measured without the user having to manage versions
+    if room in STORE["photos"]:
+        STORE["previous"][room] = STORE["photos"][room]
+    STORE["photos"][room] = image
+    return jsonify({"ok": True, "room": room,
+                    "shape": list(image.shape),
+                    "has_previous": room in STORE["previous"]})
+
+
+@app.delete("/api/photo")
+def drop_photo():
+    payload = request.get_json(silent=True) or {}
+    room = payload.get("room")
+    STORE["photos"].pop(room, None)
+    STORE["previous"].pop(room, None)
+    return jsonify({"ok": True, "room": room})
+
+
+# ------------------------------------------------------------------ analysis
+
+@app.get("/api/components")
+def components():
+    return jsonify({"components": registry.describe()})
 
 
 @app.get("/api/alerts")
@@ -76,110 +126,27 @@ def alerts():
     if df is None:
         return jsonify({"error": "no readings loaded"}), 404
     language = request.args.get("language", "en")
-    results = analyse_flat(df, language=language)
+    results = analyse_flat(
+        df, language=language,
+        photos=STORE["photos"] or None,
+        previous_photos=STORE["previous"] or None,
+        **registry.components(language))
     return jsonify({
         "rooms": results,
         "raised": sum(r["alert"]["level"] != "none" for r in results),
-        "simulated": True,
+        "simulated_sensors": True,
     })
 
 
+# ----------------------------------------------------------------------- UI
+
 @app.get("/")
-def dashboard():
-    return render_template_string(PAGE, faults=FAULT_KINDS, rooms=ROOMS)
-
-
-PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Smart Property AI</title>
-<style>
-  :root { --bg:#fbfbfa; --card:#fff; --ink:#1a1a18; --quiet:#6b6b66;
-          --line:#e4e2dd; --none:#9b9b95; --watch:#9a7b20; --action:#b4581a;
-          --urgent:#b3261e; }
-  @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
-    --bg:#1a1a18; --card:#232320; --ink:#f2f1ee; --quiet:#a8a69f; --line:#36352f;
-    --watch:#e0bb57; --action:#f0915a; --urgent:#f08a82; } }
-  * { box-sizing:border-box }
-  body { margin:0; background:var(--bg); color:var(--ink); font:15px/1.5
-         ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif; }
-  .wrap { max-width:900px; margin:0 auto; padding:32px 16px 64px; }
-  h1 { font-size:22px; margin:0 0 4px }
-  .sub { color:var(--quiet); font-size:13px; margin-bottom:24px }
-  .bar { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:24px }
-  select,button { font:inherit; padding:8px 12px; border-radius:8px;
-    border:1px solid var(--line); background:var(--card); color:var(--ink); }
-  button { cursor:pointer; font-weight:600 }
-  .card { background:var(--card); border:1px solid var(--line);
-          border-radius:12px; padding:16px; margin-bottom:12px }
-  .head { display:flex; justify-content:space-between; align-items:baseline; gap:12px }
-  .room { font-weight:600; text-transform:capitalize }
-  .lvl { font-size:12px; font-weight:700; letter-spacing:.04em; text-transform:uppercase }
-  .none{color:var(--none)} .watch{color:var(--watch)}
-  .action{color:var(--action)} .urgent{color:var(--urgent)}
-  .meta { color:var(--quiet); font-size:13px; margin-top:6px }
-  ul { margin:8px 0 0; padding-left:20px; font-size:13px }
-  .advice { margin-top:12px; padding-top:12px; border-top:1px solid var(--line);
-            font-size:14px }
-  .advice b { font-weight:600 }
-  .flag { display:inline-block; margin-top:8px; font-size:12px; font-weight:600;
-          color:var(--urgent) }
-</style></head><body><div class="wrap">
-<h1>Smart Property AI</h1>
-<div class="sub">Sensor readings are simulated. Every figure on this page comes
-from the simulator, not from a real flat.</div>
-<div class="bar">
-  <select id="fault"><option value="">no fault (healthy flat)</option>
-  {% for f in faults %}<option value="{{f}}">{{f}}</option>{% endfor %}</select>
-  <select id="room">{% for r in rooms %}<option value="{{r}}">{{r}}</option>{% endfor %}</select>
-  <select id="lang"><option value="en">English</option><option value="hi">हिन्दी</option></select>
-  <button onclick="run()">Run</button>
-</div>
-<div id="out"></div>
-</div><script>
-async function run() {
-  const fault = document.getElementById('fault').value;
-  const room = document.getElementById('room').value;
-  const lang = document.getElementById('lang').value;
-  document.getElementById('out').innerHTML = '<div class="card">Simulating…</div>';
-  await fetch('/api/demo', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({fault, room})});
-  const res = await fetch('/api/alerts?language=' + lang);
-  render(await res.json());
-}
-function render(data) {
-  if (data.error) { document.getElementById('out').textContent = data.error; return; }
-  document.getElementById('out').innerHTML = data.rooms.map(r => {
-    const a = r.alert, f = r.forecast;
-    let body = '';
-    if (a.level === 'none') {
-      body = '<div class="meta">Nothing outside this room\\'s normal week.</div>';
-    } else {
-      const damp = f.visible_damp.days, mould = f.mould_risk.days;
-      body = '<div class="meta">' + a.kind.replace(/_/g,' ') +
-        ' &middot; confidence ' + Math.round(a.confidence*100) + '%' +
-        ' &middot; forecaster: ' + f.backend + '</div>' +
-        '<div class="meta">' +
-        (damp === null ? 'No visible damp within 7 days.'
-                       : 'Visible damp in about ' + damp.toFixed(1) + ' days.') +
-        ' ' + (mould === null ? '' : 'Mould risk in about ' + mould.toFixed(1) + ' days.') +
-        '</div><ul>' + a.evidence_for.map(e => '<li>' + e + '</li>').join('') + '</ul>';
-      if (r.advice) {
-        body += '<div class="advice"><b>Cause.</b> ' + r.advice.cause +
-          '<br><b>Do.</b> ' + r.advice.action +
-          '<br><b>Call.</b> ' + r.advice.who_to_call + '</div>';
-      }
-      if (a.needs_technician_confirmation) {
-        body += '<div class="flag">Needs technician confirmation</div>';
-      }
-    }
-    return '<div class="card"><div class="head"><span class="room">' + r.room +
-      '</span><span class="lvl ' + a.level + '">' + a.level + '</span></div>' +
-      body + '</div>';
-  }).join('');
-}
-run();
-</script></body></html>"""
+def index():
+    try:
+        return send_from_directory(DIST, "index.html")
+    except Exception:
+        return ("<h1>UI not built</h1><p>Run <code>cd web &amp;&amp; npm install "
+                "&amp;&amp; npm run build</code>, then reload.</p>"), 200
 
 
 if __name__ == "__main__":

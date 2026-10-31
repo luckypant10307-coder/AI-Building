@@ -105,12 +105,14 @@ class FlatSimulator:
         elapsed = fault.active(day_index)
         elapsed_mask = (elapsed > 0).astype(float)
 
-        air_offset = {"living": 0.0, "kitchen": 0.9, "bathroom": 0.4, "bedroom": -0.3}
-        flow_share = {"bathroom": 0.55, "kitchen": 0.3, "living": 0.05, "bedroom": 0.10}
+        air_offset = {"living": 0.0, "kitchen": 0.9, "bathroom": 0.4,
+                      "master": -0.3, "bedroom2": -0.2}
+        flow_share = {"bathroom": 0.55, "kitchen": 0.30, "living": 0.05,
+                      "master": 0.05, "bedroom2": 0.05}
 
         frames = []
         for room in ROOMS:
-            air_temp = outdoor - 2.2 + air_offset[room] + self.rng.normal(0, 0.12, self.n)
+            air_temp = outdoor - 2.2 + air_offset.get(room, 0.0) + self.rng.normal(0, 0.12, self.n)
 
             # Humidity: a damp baseline, wetter while it rains, with use spikes.
             air_rh = 56.0 + 0.9 * np.minimum(rain, 10.0) + self.rng.normal(0, 1.2, self.n)
@@ -127,7 +129,7 @@ class FlatSimulator:
                 # even a sound external wall takes up a little water when it rains
                 wall_moisture += 0.004 * np.convolve(rain, np.ones(16) / 16)[: self.n]
 
-            room_flow = flat_flow * flow_share[room]
+            room_flow = flat_flow * flow_share.get(room, 0.05)
             pipe_db = 28.0 + 2.2 * room_flow + self.rng.normal(0, 0.35, self.n)
 
             if fault.kind and fault.room == room:
