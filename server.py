@@ -36,7 +36,14 @@ from flask import Flask, jsonify, request, send_from_directory
 
 warnings.filterwarnings("ignore")
 
+from smart_property.env import load_dotenv
+
+load_dotenv()          # before anything reads GEMINI_API_KEY or TELEGRAM_*
+
 from smart_property import flat_model as fm
+from smart_property import registry
+from smart_property.advisor import advise
+from smart_property.notify import Notifier
 from smart_property.config import (MOULD_RISK_SURFACE_RH, SAMPLE_MINUTES,
                                    VISIBLE_DAMP_MOISTURE)
 from smart_property.physics import dew_point
@@ -48,6 +55,7 @@ WARMUP_DAYS = 9          # a normal week plus a little, so a baseline exists
 HORIZON_DAYS = 40        # how much future the simulator pre-computes
 ANALYSIS_EVERY = 6.0     # seconds between full re-analyses
 CONTINUOUS_HOURS = 4     # flow that never stops this long means a leak
+SIM_START = "2026-06-01"
 
 app = Flask(__name__, static_folder=None)
 
@@ -63,7 +71,10 @@ class Engine:
         self.inspections = []
         self.analysis = {}
         self.analysed_at = 0.0
-        self._rebuild()
+        self.analysis_seconds = None
+        # one simulation pass at boot: the seeded leak is decided before the
+        # flat is generated, rather than generating it twice
+        self.cursor = WARMUP_DAYS * 24 * 60 // SAMPLE_MINUTES
         self._seed_scenario()
 
     def _seed_scenario(self, days_ago=2.5):
@@ -78,8 +89,7 @@ class Engine:
         visible on the wall yet -- the exact window this product is about.
         """
         start_day = max(0.5, self.cursor * SAMPLE_MINUTES / (60 * 24) - days_ago)
-        began = self.stamps[max(0, self.cursor - int(
-            days_ago * 24 * 60 / SAMPLE_MINUTES))]
+        began = pd.Timestamp(SIM_START) + pd.Timedelta(days=start_day)
         self.injected = [{"type": "pipe_leak", "room": "bathroom",
                           "since": pd.Timestamp(began).isoformat(),
                           "start_day": start_day}]
@@ -99,7 +109,8 @@ class Engine:
             first = self.injected[0]
             fault = Fault(kind=fm.TO_ENGINE[first["type"]], room=first["room"],
                           start_day=first["start_day"])
-        self.sim = FlatSimulator(seed=20261021, days=HORIZON_DAYS, fault=fault)
+        self.sim = FlatSimulator(seed=20261021, days=HORIZON_DAYS, fault=fault,
+                                 start=SIM_START)
         self.frame = self.sim.run()
         self.frame["ts"] = pd.to_datetime(self.frame["ts"])
         self.stamps = np.sort(self.frame["ts"].unique())
@@ -131,6 +142,7 @@ class Engine:
 
 
 ENGINE = Engine()
+NOTIFIER = Notifier()
 
 
 # ------------------------------------------------------------- state shaping
@@ -240,7 +252,12 @@ def build_state():
     outdoor = last["air_temp"].mean() + 2.2 if len(last) else 29.0
 
     return {
-        "ready": bool(analysis),
+        # Ready as soon as there are readings, not once analysis finishes. The
+        # page draws nothing while ready is false, and on a 0.1-CPU instance
+        # the first analysis takes two minutes: the clock would be running
+        # underneath a frozen screen. Findings simply arrive when they arrive.
+        "ready": True,
+        "analysing": not analysis,
         "mode": "simulation",
         "sim_time": now.isoformat(),
         "speed": engine.speed,
@@ -432,6 +449,17 @@ def api_pause():
     return jsonify({"ok": True, "paused": ENGINE.paused})
 
 
+@app.get("/api/notifications")
+def api_notifications():
+    return jsonify(NOTIFIER.status())
+
+
+@app.post("/api/notifications/test")
+def api_notifications_test():
+    NOTIFIER.test()
+    return jsonify({"ok": True, "channel": NOTIFIER.channel.name})
+
+
 @app.get("/")
 def index():
     try:
@@ -457,11 +485,46 @@ def clock():
             ENGINE.advance(ENGINE.speed)
 
 
+def notify_changes():
+    """Hand each room's current finding to the notifier.
+
+    The notifier decides whether anything changed; this just reports what the
+    detectors currently say. Advice in another language is produced only when
+    a message is actually going out, so Gemini is not called every cycle.
+    """
+    with ENGINE.lock:
+        analysis = dict(ENGINE.analysis)
+    now = ENGINE.now
+    for rid in fm.ROOMS:
+        result = analysis.get(rid)
+        if result is None:
+            continue
+        finding = _finding(rid, result, now)
+
+        def advice_for(language, alert=result["alert"], room=rid):
+            text = advise(alert, room, language, registry.advisor(language))
+            return text and {"cause": text["cause"], "action": text["action"],
+                             "who": text["who_to_call"]}
+
+        NOTIFIER.observe(rid, fm.ROOM_NAME[rid], finding, advice_for)
+    NOTIFIER.release_held()
+
+
 def analyst():
-    ENGINE.reanalyse()
+    """Re-run the detectors, pacing to the machine.
+
+    A fixed 6-second interval is fine on a laptop. On a 0.1-CPU instance one
+    analysis takes far longer than 6 seconds, so the thread never rests and
+    every page request queues behind it. Resting at least as long as the last
+    analysis took keeps half the CPU free for serving the dashboard.
+    """
     while True:
-        time.sleep(ANALYSIS_EVERY)
+        started = time.time()
         ENGINE.reanalyse()
+        notify_changes()
+        took = time.time() - started
+        ENGINE.analysis_seconds = round(took, 1)
+        time.sleep(max(ANALYSIS_EVERY, took))
 
 
 _started = threading.Lock()

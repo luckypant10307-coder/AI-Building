@@ -28,7 +28,7 @@ class RoomAnomalyDetector:
     def __init__(self, baseline_days=BASELINE_DAYS, contamination=0.02, seed=0):
         self.baseline_days = baseline_days
         self.model = IsolationForest(
-            n_estimators=200, contamination=contamination, random_state=seed)
+            n_estimators=100, contamination=contamination, random_state=seed)
         self.columns = None
         self.baseline_end = None
 
